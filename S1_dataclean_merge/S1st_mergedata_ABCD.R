@@ -12,14 +12,14 @@ rm(list = ls())
 Yeoresolution <- 17
 # Set path and load data
 wd <- getwd()
-homepath <- str_split_i(wd, "Normative_model", 1)
+homepath <- "/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation"
 SC_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/qsiPrep/SC_matrix'
 Volume_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/schaefer400_7_nodevolume'
-demopath <- paste0(homepath, '/Normative_model/demography')
-interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
-functionFolder <- paste0(homepath, "/Normative_model/functions")
-resultFolder <- paste0(homepath, "/Normative_model/results_ABCD")
-FigureFolder <- paste0(homepath, "/Normative_model/Figures_ABCD")
+demopath <- file.path(homepath, 'demography')
+interfileFolder <- file.path(homepath, 'interfileFolder', "ABCD")
+functionFolder <- file.path(homepath, "functions")
+resultFolder <- file.path(homepath, "results", "ABCD")
+FigureFolder <- file.path(homepath, "reports", "figures", "ABCD")
 
 Behavior <- read.csv(paste0(demopath, '/demo_sublist7.csv'))
 
