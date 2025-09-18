@@ -12,14 +12,14 @@ rm(list = ls())
 Yeoresolution <- 17
 # Set path and load data
 wd <- getwd()
-homepath <- "/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation"
+homepath <- "D:/code/ADHD_SC_deviation"
 SC_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/qsiPrep/SC_matrix'
 Volume_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/schaefer400_7_nodevolume'
 demopath <- file.path(homepath, "data", 'demography')
 interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
 functionFolder <- file.path(homepath, "functions")
-resultFolder <- file.path(homepath, "data", "reports", "results", "ABCD")
-FigureFolder <- file.path(homepath, "data", "reports", "figures", "ABCD")
+resultFolder <- file.path(homepath, "reports", "results", "ABCD")
+FigureFolder <- file.path(homepath, "reports", "figures", "ABCD")
 
 Behavior <- read.csv(paste0(demopath, '/demo_sublist7.csv'))
 
@@ -124,6 +124,8 @@ Matrix.376[indexsave] <- index
 Matrix.376[indexup] <- t(Matrix.376)[indexup]
 colnames(Matrix.376) <-seq(1, Matsize)
 rownames(Matrix.376) <-seq(1, Matsize)
+fig_path <- paste0(FigureFolder, '/SCmatrix/SClog376_CV75_Yeo', Yeoresolution,'.tiff')
+dir.create(dirname(fig_path), recursive = TRUE, showWarnings = FALSE)
 tiff( 
   filename = paste0(FigureFolder, '/SCmatrix/SClog376_CV75_Yeo', Yeoresolution,'.tiff'),
   width = 600, 
@@ -140,8 +142,10 @@ Matrix.376[indexsave] <- index
 Matrix.376[indexup] <- t(Matrix.376)[indexup]
 colnames(Matrix.376) <-seq(1, Matsize)
 rownames(Matrix.376) <-seq(1, Matsize)
+fig_path <- paste0(FigureFolder, '/SCmatrix/SClog376_CV25_Yeo', Yeoresolution,'.tiff')
+dir.create(dirname(fig_path), recursive = TRUE, showWarnings = FALSE)
 tiff( 
-  filename = paste0(FigureFolder, '/SCmatrix/SClog376_CV25_Yeo', Yeoresolution,'.tiff'),
+  filename = fig_path,
   width = 600, 
   height = 600,
   units = "px",
