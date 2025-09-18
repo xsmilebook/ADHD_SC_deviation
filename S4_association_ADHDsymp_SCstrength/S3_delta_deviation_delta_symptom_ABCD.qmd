@@ -1,0 +1,345 @@
+---
+title: "S1_delta_deviation_delta_symptom"
+author:
+  - name: Xiaoyu Xu
+    orcid: 0000-0002-7349-3366
+    email: xuxiaoyu@cibr.ac.cn
+    url: https://scholar.google.com/citations?user=G0jeI1AAAAAJl
+    affiliation: 
+      - name: Chinese Institute for Brain Research, Beijing (CIBR)
+        group: CUIZAIXU Lab
+        url: https://cuilab.cibr.ac.cn/
+date: "2025-06-09"
+format: 
+  html:
+    code-fold: true
+    code-tools: true
+    theme: Materia
+    toc: true
+    toc_depth: 3
+    toc-expand: 1
+    toc_float: true
+    toc-location: left
+    number-sections: true
+    number-depth: 3
+    embed-resources: true
+---
+
+This script is to test whether the SC deviation change associated with symtom change.
+
+```{r}
+#| label: load-packages-data
+#| include: false
+rm(list=ls())
+library(ggplot2)
+library(RColorBrewer)
+library(tidyverse)
+library(mgcv)
+library(ppcor)
+library(openxlsx)
+library(parallel)
+library(ecostats)
+library(psych)
+library(reshape)
+library(tableone)
+library(chorddiag)
+library(circlize)
+# set resolution
+Yeoresolution <- 17
+if (Yeoresolution == 7){
+  Yeoresolution.delLM = 6
+}else if (Yeoresolution == 17){
+  Yeoresolution.delLM = 15
+}
+element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
+# input directory
+wd <- getwd()
+homepath <- str_split_i(wd, "Normative_model", 1)
+demopath <- paste0(homepath, '/Normative_model/demography')
+interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
+functionFolder <- paste0(homepath, "/Normative_model/functions")
+resultFolder <- paste0(homepath, "/Normative_model/results_ABCD")
+functionFolder.SCDev <- paste0(homepath, "/SC_development/Rcode_SCdevelopment/gamfunction")
+FigureFolder <- paste0(homepath, '/Normative_model/Figures_ABCD/Yeo', Yeoresolution,'/CV75')
+source(paste0(functionFolder.SCDev, "/SCrankcorr.R"))
+source(paste0(functionFolder.SCDev, "/gammsmooth.R"))
+source(paste0(functionFolder.SCDev, "/plotdata_generate.R"))
+source(paste0(functionFolder, "/lmsymp.R"))
+source(paste0(functionFolder, "/plotmatrix.R"))
+# Load data
+SCdata.sum75.merge.ADHDTD <- readRDS(paste0(interfileFolder, '/SCdata_Yeo',Yeoresolution, '_CV75_sumSCinvnode.deviations_TDtest_ADHD.rds'))
+SCdata.sum75.merge.ADHDTD$sex <- as.factor(SCdata.sum75.merge.ADHDTD$sex)
+SCdata.sum75.merge.ADHDTD$meanFD <- as.numeric(SCdata.sum75.merge.ADHDTD$meanFD)
+SCdata.sum75.merge.ADHDTD$if_TD <- factor(SCdata.sum75.merge.ADHDTD$if_TD, levels = c("TD", "ADHD"))
+SCdata.sum75.merge.ADHDTD$agefactor <- (SCdata.sum75.merge.ADHDTD$age < 10.3)
+SCdata.sum75.merge.ADHDTD$agefactor <- factor(SCdata.sum75.merge.ADHDTD$agefactor, levels = c(T, F), labels=c("young", "old"))
+Behavior <- read.csv(paste0(demopath, "/demo_sublist7.csv"))
+#SCdata.sum75.merge.ADHDTD <- SCdata.sum75.merge.ADHDTD %>% left_join(dplyr::select(Behavior, scanID, GENERAL.norm, EXT.norm, ADHD.norm, INT.norm, ATT.norm, HI.norm), by="scanID")
+SCdata.ADHD <- SCdata.sum75.merge.ADHDTD %>% filter(if_TD=="ADHD")
+SCdata.TD <- SCdata.sum75.merge.ADHDTD %>% filter(if_TD=="TD")
+
+SCdata.ADHDTD.l <- SCdata.sum75.merge.ADHDTD %>% group_by(subID) %>% filter(n()>1)
+SCdata.ADHDTD.l$eventname <- factor(SCdata.ADHDTD.l$eventname, levels = c("baseline_year_1_arm_1", "2_year_follow_up_y_arm_1", "4_year_follow_up_y_arm_1"))
+table(SCdata.ADHDTD.l$if_TD, SCdata.ADHDTD.l$eventname)
+SCdata.ADHD.l <- SCdata.ADHDTD.l %>% filter(if_TD=="ADHD")
+
+gamresultsum.df.ADHD <- readRDS(paste0(interfileFolder, '/AllSCDeviation_NormSymptom_Age_Yeo', Yeoresolution,'_CV75_ADHD.rds'))
+gamresultsum.df.ADHD.SC <- gamresultsum.df.ADHD[str_detect(gamresultsum.df.ADHD$parcel, "SC."),]
+gamresultsum.df.ADHD.SC$bootstrap_p.fdr <- p.adjust(gamresultsum.df.ADHD.SC$bootstrap_pvalue, method="fdr")
+interaction.df <- readRDS(paste0(interfileFolder, "/Deviation_TDtest-ADHDall_SC", element_num,".rds"))
+interaction.df <- interaction.df[seq(from=2, to=2*element_num, by = 2),]
+
+interaction.df <- interaction.df %>% filter(parcel %in% gamresultsum.df.ADHD.SC$parcel[gamresultsum.df.ADHD.SC$bootstrap_p.fdr<0.05])
+
+interaction.df$bootstrap_pvalue.fdr <- p.adjust(interaction.df$bootstrap_pvalue, method = "fdr")
+
+sigedge.all <- interaction.df$parcel[interaction.df$bootstrap_pvalue.fdr < 0.05]
+Association_symptom <- read.csv(paste0(resultFolder, "/SCDeviation_Symptom_Age_CV75_Yeo17_ADHDall_controlAgeSex.csv"))
+
+```
+
+## Step1 Compute the deviation delta of ADHD participants.
+
+Pair definition: baseline - 2year-FU; 2year-FU - 4year-FU
+
+```{r}
+#| label: Step1
+
+symptomvar <- c("GENERAL.norm", "EXT.norm", "ADHD.norm", "INT.norm", "ATT.norm", "HI.norm", "cbcl_scr_syn_internal_t", "cbcl_scr_syn_external_t", "cbcl_scr_dsm5_adhd_t", "cbcl_scr_syn_attention_t", "cbcl_scr_syn_totprob_t")
+SCdata.ADHDTD.l$visit <- factor(SCdata.ADHDTD.l$eventname, levels = c("baseline_year_1_arm_1", "2_year_follow_up_y_arm_1", "4_year_follow_up_y_arm_1"), labels=c(1, 2, 3))
+# compute difference
+SCdata.ADHDTD.l.delta <- SCdata.ADHDTD.l %>% dplyr::select(subID, visit, age, sex, meanFD, if_TD, all_of(symptomvar), matches("^SC.*deviationZ$")) %>%
+  group_by(subID) %>% dplyr::arrange(visit, .by_group = T) %>%
+  mutate(across(c(matches("^SC.*deviationZ$"), "age", symptomvar), 
+                list(diff_2_b = ~ifelse(visit == 2, . - .[visit == 1], NA),
+                  diff_4_2 = ~ifelse(visit == 3, . - .[visit == 2], NA),
+                  diff_4_b = ~ifelse(visit == 3, . - .[visit == 1], NA)), 
+                .names = "{.col}_{.fn}"),
+         sex = unique(sex),
+         across(c("age", "meanFD"), 
+                list(mean_2_b = ~ifelse(visit == 2, (. + .[visit == 1])/2, NA),
+                  mean_4_2 = ~ifelse(visit == 3, (. + .[visit == 2])/2, NA),
+                  mean_4_b = ~ifelse(visit == 3, (. + .[visit == 1])/2, NA)), 
+                .names = "{.col}_{.fn}")
+         ) %>%
+  dplyr::select(-c(matches("^SC.*deviationZ$"), all_of(symptomvar))) %>% 
+  filter(visit %in% c(2,3)) %>% 
+  fill(starts_with("SC_"), .direction = "downup") %>% 
+  dplyr::select(-visit)
+
+# compute difference scaled by age gap
+SCdata.ADHDTD.l.delta <- SCdata.ADHDTD.l.delta %>% 
+  mutate(across(matches("*_diff_2_b$"), list(delta_2b = ~ifelse(!is.na(.), . / age_diff_2_b, NA)), .names = "{.col}_{.fn}"),
+         across(matches("*_diff_4_2$"), list(delta_42 = ~ifelse(!is.na(.), . / age_diff_4_2, NA)), .names = "{.col}_{.fn}"),
+         across(matches("*_diff_4_b$"), list(delta_4b = ~ifelse(!is.na(.), . / age_diff_4_b, NA)), .names = "{.col}_{.fn}")
+         ) %>% dplyr::select(contains("delta"), contains("age"), subID, contains("mean"), if_TD, sex)
+
+index <- which(str_detect(names(SCdata.ADHDTD.l.delta), "SC."))
+names(SCdata.ADHDTD.l.delta)[index] <- paste0(str_split_i(names(SCdata.ADHDTD.l.delta)[index], "_", 1), "_", str_split_i(names(SCdata.ADHDTD.l.delta)[index], "_", 6), "_", str_split_i(names(SCdata.ADHDTD.l.delta)[index], "_", 7))
+index2 <- which(str_detect(names(SCdata.ADHDTD.l.delta), "diff") & str_detect(names(SCdata.ADHDTD.l.delta), "delta"))
+names(SCdata.ADHDTD.l.delta)[index2] <- gsub("_diff_2_b", "", names(SCdata.ADHDTD.l.delta)[index2])
+names(SCdata.ADHDTD.l.delta)[index2] <- gsub("_diff_4_b", "", names(SCdata.ADHDTD.l.delta)[index2])
+names(SCdata.ADHDTD.l.delta)[index2] <- gsub("_diff_4_2", "", names(SCdata.ADHDTD.l.delta)[index2])
+
+SCdata.ADHDTD.l.delta.l <- SCdata.ADHDTD.l.delta %>% 
+  pivot_longer(
+    cols = matches(".+_(delta_2b|delta_42|delta_4b)$"),
+    names_to = c("Var", "delta_type"), 
+    names_pattern = "(.+)_(delta_.*)",
+    values_to = "delta_value"
+  ) %>% dplyr::select(-matches("^age.*delta"))
+
+SCdata.ADHDTD.l.delta.l2 <- SCdata.ADHDTD.l.delta.l %>% 
+  pivot_wider(names_from = Var,
+              values_from = delta_value,
+              names_glue = "{Var}_delta")
+SCdata.ADHDTD.l.delta.l2 <- SCdata.ADHDTD.l.delta.l2 %>% drop_na(ends_with("_delta"))
+
+write.csv(SCdata.ADHDTD.l.delta.l2, paste0(interfileFolder, "/Delta_SCDeviation_symptomTscore_ADHD_TD_Yeo", element_num, "_CV75.csv"), row.names = F)
+# organize covariates
+SCdata.ADHDTD.l.delta.l2 <- SCdata.ADHDTD.l.delta.l2 %>% mutate(
+  meanFD.M = case_when(
+    delta_type == "delta_2b" ~ meanFD_mean_2_b,
+    delta_type == "delta_42" ~ meanFD_mean_4_2,
+    delta_type == "delta_4b" ~ meanFD_mean_4_b,
+    .default = NA),
+  age.M = case_when(
+    delta_type == "delta_2b" ~ age_mean_2_b,
+    delta_type == "delta_42" ~ age_mean_4_2,
+    delta_type == "delta_4b" ~ age_mean_4_b,
+    .default = NA)
+) %>% dplyr::select(-c(starts_with("age_"), starts_with("meanFD_")))
+
+deltavars <- names(SCdata.ADHDTD.l.delta.l2)[str_detect(names(SCdata.ADHDTD.l.delta.l2), "_delta")]
+describetab <- CreateTableOne(deltavars, strata = "if_TD",data=SCdata.ADHDTD.l.delta.l2, test = TRUE, smd = TRUE)
+describetab <- print(describetab, pDigits = 3, test=T)
+
+write.csv(describetab, paste0(resultFolder, "/delta_stats_SC_Yeo", element_num, "_CV75.csv"))
+```
+
+## Step2 Correlation analyses for SC.delta and symptom.delta.
+
+Referring to Chiang et al., Asian J Psychiatr, 2023.
+
+```{r}
+#| label: Step2
+
+SCdata.ADHDTD.l.delta.l2 <- as.data.frame(SCdata.ADHDTD.l.delta.l2)
+
+SCdata.ADHD.l.delta <- SCdata.ADHDTD.l.delta.l2 %>% filter(if_TD=="ADHD")
+
+
+
+
+
+```
+
+
+
+## Step3 Multi variates regression
+
+delta_ext ~ delta_SCrank110 + delta_SCrank119 + sex + age.M
+delta_adhd ~ delta_SCrank119 + sex + age.M
+
+```{r}
+#| label: Step3
+SCdata.ADHDTD.l.delta.l2 <- as.data.frame(SCdata.ADHDTD.l.delta.l2)
+SCdata.ADHD.l.delta <- SCdata.ADHDTD.l.delta.l2 %>% filter(if_TD=="ADHD")
+SCdata.ADHD.l.delta.b2 <- SCdata.ADHD.l.delta %>% filter(delta_type == "delta_2b")
+dataname <- "SCdata.ADHD.l.delta"
+
+## external
+MedExternal <- readRDS(paste0(interfileFolder, "/MultiMediation_SCDeviation_cbcl_scr_syn_external_t_Age_CV75_Yeo17_ADHDall_controlSex.rds"))
+
+# 1) Fit models
+modExtFormula.full <- as.formula("cbcl_scr_syn_external_t_delta ~ SC.109_delta + SC.119_delta + sex + age.M + meanFD.M")
+modExtFormula.null <- as.formula("cbcl_scr_syn_external_t_delta ~ sex + age.M + meanFD.M")
+modExt.full <- glm(modExtFormula.full, family = gaussian, data=SCdata.ADHD.l.delta)
+modExt.null <- glm(modExtFormula.null, family = gaussian, data=SCdata.ADHD.l.delta)
+summary(modExt.full)
+
+anovaExt <- anovaPB(modExt.null, modExt.full, n.sim = 10000, ncpus=1, test="Chisq")
+#   Resid. Df Resid. Dev Df Deviance        
+# 1       211       3335                    
+# 2       209       3232  2    102.5    0.039 *
+predictedExt.full <- predict(modExt.full)
+predictedExt.null <- predict(modExt.null)
+
+# 2) Partial correlation
+pcor_result <- pcor.test(predictedExt.full, SCdata.ADHD.l.delta$cbcl_scr_syn_external_t_delta, predictedExt.null, method = "pearson")
+#    estimate     p.value statistic   n gp  Method
+# 1 0.175296 0.01019143  2.592491 215  1 pearson
+
+# 3) plot
+predictedExt.full.res <- resid(lm(predictedExt.full ~ predictedExt.null))
+actualExt.res <- resid(lm(SCdata.ADHD.l.delta$cbcl_scr_syn_external_t_delta ~ predictedExt.null))
+
+scatterplot <- ggplot()+
+  geom_point(aes(x=actualExt.res, y=predictedExt.full.res), color="#810F7C", alpha=0.3)+
+  geom_smooth(aes(x=actualExt.res, y=predictedExt.full.res), fill="#810F7C",color="black", method="lm")+
+  labs(x="Observed \u0394external symptom", y="Fitted \u0394external symptom\nfrom SC deviation")+
+  theme_classic()+
+  theme(axis.text=element_text(size=17.5, color="black"),
+        axis.title =element_text(size=17.5, color="black"),
+        aspect.ratio = 0.9,
+        plot.subtitle = element_text(size=20.5, hjust=0.1, vjust=-6, color="black"),
+        plot.background=element_rect(fill="transparent"),
+        panel.background=element_rect(fill="transparent"),
+        legend.text = element_text(size=15, color="black"),
+        legend.title = element_text(size=15, color="black"))
+
+ggsave(paste0(FigureFolder, "/DeltaSCDeviation_DeltaSymptom/Scatter/DeltaSC109SC119_DeltaExternal_Tscore_sigDiagnosis_controlAgeSex.tiff"), scatterplot, width = 13, height=13, units = "cm")
+
+
+## ADHD
+MedADHD <- readRDS(paste0(interfileFolder, "/MultiMediation_SCDeviation_cbcl_scr_dsm5_adhd_t_Age_CV75_Yeo17_ADHDall_controlSex.rds"))
+
+# 1) Fit models
+modADHDFormula.full <- as.formula("cbcl_scr_dsm5_adhd_t_delta ~ SC.119_delta + sex + age.M + meanFD.M")
+modADHDFormula.null <- as.formula("cbcl_scr_dsm5_adhd_t_delta ~ sex + age.M + meanFD.M")
+modADHD.full <- glm(modADHDFormula.full, family = gaussian, data=SCdata.ADHD.l.delta)
+modADHD.null <- glm(modADHDFormula.null, family = gaussian, data=SCdata.ADHD.l.delta)
+summary(modADHD.full)
+
+anovaADHD <- anovaPB(modADHD.null, modADHD.full, n.sim = 10000, ncpus=1, test="Chisq")
+#   Resid. Df Resid. Dev Df Deviance Pr(>Chi)
+# 1       211       2491                    
+# 2       210       2440  1    51.65    0.037 *
+predictedADHD.full <- predict(modADHD.full)
+predictedADHD.null <- predict(modADHD.null)
+
+# 2) Partial correlation
+pcor_result <- pcor.test(predictedADHD.full, SCdata.ADHD.l.delta$cbcl_scr_dsm5_adhd_t_delta, predictedADHD.null, method = "pearson")
+#    estimate     p.value statistic   n gp  Method
+# 1  0.143984 0.03529573  2.118514 215  1 pearson
+
+# 3) plot
+predictedADHD.full.res <- resid(lm(predictedADHD.full ~ predictedADHD.null))
+actualADHD.res <- resid(lm(SCdata.ADHD.l.delta$cbcl_scr_dsm5_adhd_t_delta ~ predictedADHD.null))
+
+scatterplot <- ggplot()+
+  geom_point(aes(x=actualADHD.res, y=predictedADHD.full.res), color="#810F7C", alpha=0.3)+
+  geom_smooth(aes(x=actualADHD.res, y=predictedADHD.full.res), fill="#810F7C",color="black", method="lm")+
+  labs(x="Observed \u0394ADHD symptom", y="Fitted \u0394ADHD symptom\nfrom SC deviation")+
+  theme_classic()+
+  theme(axis.text=element_text(size=17.5, color="black"),
+        axis.title =element_text(size=17.5, color="black"),
+        aspect.ratio = 0.9,
+        plot.subtitle = element_text(size=20.5, hjust=0.1, vjust=-6, color="black"),
+        plot.background=element_rect(fill="transparent"),
+        panel.background=element_rect(fill="transparent"),
+        legend.text = element_text(size=15, color="black"),
+        legend.title = element_text(size=15, color="black"))
+
+ggsave(paste0(FigureFolder, "/DeltaSCDeviation_DeltaSymptom/Scatter/DeltaSC119_DeltaADHD_Tscore_sigDiagnosis_controlAgeSex.tiff"), scatterplot, width = 13, height=13, units = "cm")
+
+## Attention
+MedATT <- readRDS(paste0(interfileFolder, "/MultiMediation_SCDeviation_cbcl_scr_syn_attention_t_Age_CV75_Yeo17_ADHDall_controlSex.rds"))
+
+# 1) Fit models
+modATTFormula.full <- as.formula("cbcl_scr_syn_attention_t_delta ~ SC.109_delta + sex + age.M + meanFD.M")
+modATTFormula.null <- as.formula("cbcl_scr_syn_attention_t_delta ~ sex + age.M + meanFD.M")
+modATT.full <- glm(modATTFormula.full, family = gaussian, data=SCdata.ADHD.l.delta)
+modATT.null <- glm(modATTFormula.null, family = gaussian, data=SCdata.ADHD.l.delta)
+summary(modATT.full)
+
+anovaATT <- anovaPB(modATT.null, modATT.full, n.sim = 10000, ncpus=1, test="Chisq")
+#   Resid. Df Resid. Dev Df Deviance Pr(>Chi)
+# 1       211       2890                       
+# 2       210       2821  1    69.06    0.023 *
+predictedATT.full <- predict(modATT.full)
+predictedATT.null <- predict(modATT.null)
+
+# 2) Partial correlation
+pcor_result <- pcor.test(predictedATT.full, SCdata.ADHD.l.delta$cbcl_scr_syn_attention_t_delta, predictedATT.null, method = "pearson")
+#    estimate     p.value statistic   n gp  Method
+# 1  0.1545953 0.02370331  2.278332 215  1 pearson
+
+# 3) plot
+predictedATT.full.res <- resid(lm(predictedATT.full ~ predictedATT.null))
+actualATT.res <- resid(lm(SCdata.ADHD.l.delta$cbcl_scr_syn_attention_t_delta ~ predictedATT.null))
+
+scatterplot <- ggplot()+
+  geom_point(aes(x=actualATT.res, y=predictedATT.full.res), color="#810F7C", alpha=0.3)+
+  geom_smooth(aes(x=actualATT.res, y=predictedATT.full.res), fill="#810F7C",color="black", method="lm")+
+  labs(x="Observed \u0394attention symptom", y="Fitted \u0394attention symptom\nfrom SC deviation")+
+  theme_classic()+
+  theme(axis.text=element_text(size=17.5, color="black"),
+        axis.title =element_text(size=17.5, color="black"),
+        aspect.ratio = 0.9,
+        plot.subtitle = element_text(size=20.5, hjust=0.1, vjust=-6, color="black"),
+        plot.background=element_rect(fill="transparent"),
+        panel.background=element_rect(fill="transparent"),
+        legend.text = element_text(size=15, color="black"),
+        legend.title = element_text(size=15, color="black"))
+
+ggsave(paste0(FigureFolder, "/DeltaSCDeviation_DeltaSymptom/Scatter/DeltaSC109_DeltaATT_Tscore_sigDiagnosis_controlAgeSex.tiff"), scatterplot, width = 13, height=13, units = "cm")
+
+
+
+p.adjust(c(0.039, 0.037, 0.023), method="fdr")
+# 0.039 0.039 0.039
+
+```
+
+

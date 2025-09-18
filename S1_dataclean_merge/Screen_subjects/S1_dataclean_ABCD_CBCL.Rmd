@@ -1,0 +1,176 @@
+---
+title: "S1_dataclean_ABCD_CBCL"
+author: "Xiaoyu Xu"
+date: "2025-01-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+library(tidyverse)
+library(ggplot2)
+library(tableone)
+library(psych)
+library(RColorBrewer)
+infopath <- "D:/xuxiaoyu/open_dataset_information/ABCD/info"
+release5path <- "Y:/abcd-data-release-5.0/abcd-data-release-5.1/core"
+demopath <- "D:/xuxiaoyu/DMRI_network_development/Normative_model/demography"
+filerecord_base <- read.csv(paste0(infopath, "/filerecord_base.csv"))
+filerecord_2year <- read.csv(paste0(infopath, "/filerecord_2year.csv"))
+filerecord_4year <- read.csv(paste0(infopath, "/filerecord_4year.csv"))
+FigureFolderABCD <- 'D:/xuxiaoyu/DMRI_network_development/Normative_model/Figures'
+
+```
+
+## Step1 general exclusion by demographic information
+
+We will keep participants from baseline, 2year-follow up, and 4year-follow up.
+Exclusion criteria:
+1)Participants were not proficient in English;
+2)Parents were not proficient in English or Spanish;
+3)Participants with traumatic brain injury history (Mild, moderate, and severe);
+4)Participants with uncorrected visual or auditory deficits;
+5)Participants with intellectual disability;
+6)Participants with major medical or neurological conditions;
+
+
+```{r step1_excluddemo}
+demo_sublist_criteria <- read.csv(paste0(infopath, "/demo_sublist_criteria.csv"))
+demo_sublist <- demo_sublist_criteria %>% 
+  filter(if_language_y==F &
+         if_language_p==F &
+         if_TBI==F &
+         if_sensory==F &
+         if_intel==F &
+         if_medical==F &
+         if_age==F &
+         if_gender==F)
+
+num_exclude1 = nrow(demo_sublist_criteria) - nrow(demo_sublist)
+print(paste("1st, based on demographic criteria, we excluded", num_exclude1, "visits in total, left", nrow(demo_sublist), "visits."))
+table(demo_sublist$eventname)
+
+```
+
+## Step 2 add diagnosis
+
+diagnosed as TD; or diagnosed as ADHD at any one of visits
+Note: Because many individual questions were not measured at 1Year-FU & 3Year-FU, the TD label may not be accurate at these two waves. Luckily, Attention Deficit Hyperactivity Disorder (Indiv. Questions) were assessed annually since Baseline. Therefore, we only included TD participants from baseline, 2Year-FU and 4Year-FU, as well as ADHD participants from all the waves.
+
+```{r add_diagnosis}
+mh_p_ksads2 <- read.csv(paste0(infopath, "/mh_p_ksads_lab2.csv"))
+mh_p_ksads2[,c("src_subject_id", "eventname")] <- NULL
+demo_sublist2 <- merge(demo_sublist, mh_p_ksads2, by="scanID", all.x=T)
+demo_sublist2$ADHD_trajectory <- as.factor(demo_sublist2$ADHD_trajectory)
+table(demo_sublist2$if_ADHD, demo_sublist2$ADHD_trajectory)
+# add a variable if_anyADHD_l indicating if the subjects were diagnosed as ADHD or unspecified ADHD at any visit.
+demo_sublist3 <- demo_sublist2 %>% drop_na(if_TD, if_ADHD)
+demo_sublist3 <- demo_sublist3 %>% group_by(src_subject_id) %>% mutate(
+  if_anyADHD_l = any(if_ADHD==T)
+) %>% ungroup()
+
+demo_sublist3 <- demo_sublist3 %>% filter((if_TD==1 & eventname2 %in% c("baselineYear1Arm1", "2YearFollowUpYArm1", "4YearFollowUpYArm1")) | if_anyADHD_l==1)
+num_exclude2 = nrow(demo_sublist2) - nrow(demo_sublist3)
+
+print(paste("2nd,", nrow(demo_sublist3), "were diagnosed as TD at baseline, 2Year- & 4Year-FU or diagnosed as ADHD for at least one time,", num_exclude2, "participants were excluded."))
+
+```
+
+## Step3 filter subjects with at least two visits
+
+```{r visits}
+# CBCL
+mh_p_cbcl <- read.csv(paste0(release5path, "/mental-health/mh_p_cbcl.csv"))
+mh_p_cbcl <- mh_p_cbcl %>% select(c("src_subject_id", "eventname", ends_with("_r"), ends_with("_t")))
+demo_sublist3 <- merge(demo_sublist3, mh_p_cbcl, by=c("src_subject_id", "eventname"), all.x=T)
+demo_sublist4 <- demo_sublist3 %>% drop_na(cbcl_scr_dsm5_adhd_r)
+
+demo_sublist4 <- demo_sublist4 %>% group_by(subID) %>%
+  filter((n() >= 2 & if_anyADHD_l==1) | (if_TD==1 & if_anyADHD_l==0)) %>%
+  ungroup()
+num_exclude3 = nrow(demo_sublist3) - nrow(demo_sublist4)
+
+table(demo_sublist4$if_anyADHD_l, demo_sublist4$if_TD)
+print(paste("3rd,", nrow(demo_sublist4), "were included in ADHD symptom clustering analysis,", sum(demo_sublist4$if_TD==T), "participants were TD,", sum(demo_sublist4$if_anyADHD_l==1), "participants were diagnosed as ADHD at least one visits and have CBCL data for at least two visits,", num_exclude3, "participants were excluded."))
+
+
+```
+
+## Step4 merge demographic information
+
+1) sex from "abcd_p_demo.csv"
+2) age from "abcd_y_lt.csv"
+3) handedness from "nc_y_ehis.csv"
+4) cognition from "nc_y_nihtb.csv"
+
+
+```{r merge_demo}
+# age & sex
+abcd_y_lt <- read.csv(paste0(release5path, '/abcd-general/abcd_y_lt.csv'))
+abcd_p_demo <- read.csv(paste0(release5path,'/abcd-general/abcd_p_demo.csv'))
+demo_sublist4 <- demo_sublist4 %>% left_join(select(abcd_y_lt, src_subject_id, eventname, site_id_l, interview_age), join_by(src_subject_id, eventname))
+demo_sublist4$age <- demo_sublist4$interview_age / 12
+demo_sublist4 <- demo_sublist4 %>% left_join(select(abcd_p_demo, c("src_subject_id", "demo_sex_v2")), by="src_subject_id", multiple="first")
+
+# handedness
+nc_y_ehis <- read.csv(paste0(release5path, '/neurocognition/nc_y_ehis.csv'))
+demo_sublist4 <- demo_sublist4 %>% left_join(select(nc_y_ehis, c("src_subject_id", "ehi_y_ss_scoreb")), join_by("src_subject_id"), multiple="first")
+
+# cognition
+nc_y_nihtb <- read.csv(paste0(release5path, '/neurocognition/nc_y_nihtb.csv'))
+interest_cogvar <- c("src_subject_id", "eventname","nihtbx_flanker_uncorrected", "nihtbx_list_uncorrected", "nihtbx_cardsort_uncorrected", "nihtbx_pattern_uncorrected", "nihtbx_fluidcomp_uncorrected", "nihtbx_cryst_uncorrected", "nihtbx_totalcomp_uncorrected")
+demo_sublist4 <- demo_sublist4 %>% left_join(select(nc_y_nihtb, all_of(interest_cogvar)), by=join_by(src_subject_id, eventname))
+
+# merge pfactor
+pFactor <- read.csv(paste0(infopath,"/p.factor/BifactorP_baseTo4Year.csv"))
+pFactor$eventname2 <- gsub("_", "", pFactor$eventname)
+pFactor$eventname <- NULL
+demo_sublist4 <- merge(demo_sublist4, pFactor, by.x=c("src_subject_id", "eventname2"), by.y=c("srcsubjectid", "eventname2"), all.x=T)
+
+
+# SES
+abcd_p_demo <- read.csv(paste0(release5path,'/abcd-general/abcd_p_demo.csv'))
+demo_sublist4 <- demo_sublist4 %>% left_join(select(abcd_p_demo, c("src_subject_id", "eventname", "demo_comb_income_v2", "demo_roster_v2", "demo_comb_income_v2_l", "demo_roster_v2_l")), join_by("src_subject_id", "eventname"))
+demo_sublist4 <- demo_sublist4 %>% left_join(select(abcd_y_lt, src_subject_id, eventname, interview_date), join_by(src_subject_id, eventname))
+demo_sublist4 <- demo_sublist4 %>%
+  group_by(src_subject_id) %>%
+  mutate(demo_comb_income_v2 = coalesce(demo_comb_income_v2, demo_comb_income_v2_l)) %>%
+  mutate(demo_roster_v2 = coalesce(demo_roster_v2, demo_roster_v2_l)) %>%
+  ungroup()
+demo_sublist4$demo_comb_income_v2_l <- demo_sublist4$demo_roster_v2_l <- NULL
+demo_sublist4$totalincome <- dplyr::recode(demo_sublist4$demo_comb_income_v2, 
+                                      `1` = 2500, `2` = 8500, `3` = 13999.5, `4` = 20499.5, `5` = 29999.5, `6` = 42499.5, `7` = 62499.5, `8` = 87499.5, `9` = 149999.5, `10` = 200000)
+demo_sublist4$interviewYear<-substr(demo_sublist4$interview_date,start=nchar(demo_sublist4$interview_date)-3, stop=nchar(demo_sublist4$interview_date))
+demo_sublist4$interviewYear=as.numeric(demo_sublist4$interviewYear)
+reference_data <- data.frame(familysize = rep(c(1:12),7),
+                             povertyline = c(11880,16020,20160,24300,28440,32580,36730,40890,seq(from=45050, to=(45050+4160*3), by=4160), 12140,16460,20780,25100,29420,33740,38060,42380, 46700,51020,	55340,	59660, 12060,16240,20420,24600,28780,32960,37140,41320, 45500,	49680,	53860,	58040,12490,	16910,	21330,	25750,	30170,	34590,	39010,	43430,	47850,	52270,	56690,	61110,seq(from=12760, to=(12760+4480*11), by=4480), seq(from=12880, to=(12880+4540*11), by=4540), seq(from=12880, to=(13590+4720*11), by=4720)),Year = c(rep(2016,12),rep(2018,12), rep(2017,12), rep(2019,12),rep(2020,12),rep(2021,12),rep(2022,12)))
+demo_sublist4 <- merge(demo_sublist4, reference_data,
+                          by.x = c("interviewYear", "demo_roster_v2"),
+                          by.y = c("Year", "familysize"), 
+                          all.x = TRUE)
+demo_sublist4$income.adj<-demo_sublist4$totalincome / demo_sublist4$povertyline
+summary(demo_sublist4$income.adj)
+
+# race
+abcd_p_demo <- read.csv(paste0(release5path,'/abcd-general/abcd_p_demo.csv'))
+abcd_p_demo <- abcd_p_demo %>%
+  mutate(race_ethnicity = if_else(eventname == "baseline_year_1_arm_1" & is.na(race_ethnicity), 0, race_ethnicity))
+abcd_p_demo <- abcd_p_demo %>% group_by(src_subject_id) %>% 
+  mutate(race_ethnicity = zoo::na.locf(race_ethnicity)) %>%
+  mutate(race_ethnicity = zoo::na.locf(race_ethnicity, fromLast = TRUE, na.rm = F))
+abcd_p_demo$race_ethnicity <- as.factor(abcd_p_demo$race_ethnicity)
+
+# 1 = White; 2 = Black; 3 = Hispanic; 4 = Asian; 5 = Other; 0=NA
+demo_sublist4 <- demo_sublist4 %>% left_join(select(abcd_p_demo, c("src_subject_id", "eventname", "race_ethnicity")), join_by("src_subject_id", "eventname"))
+demo_sublist4$race_ethnicity <- factor(demo_sublist4$race_ethnicity, levels=c(0:5), labels=c("NA","White", "Black", "Hispanic", "Asian", "Other"))
+summary(demo_sublist4$race_ethnicity)
+
+# write out
+write.csv(demo_sublist4, paste0(demopath, "/demo_sublist_CBCLtrajectory.csv"), row.names = F)
+
+```
+
+
+
+

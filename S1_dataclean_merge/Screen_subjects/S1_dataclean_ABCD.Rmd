@@ -1,0 +1,439 @@
+---
+title: "S1_dataclean_ABCD"
+output: html_document
+date: "2024-08-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+library(tidyverse)
+library(ggplot2)
+library(tableone)
+library(psych)
+library(RColorBrewer)
+library(stringr)
+library(gamm4)
+infopath <- "D:/xuxiaoyu/open_dataset_information/ABCD/info"
+release5path <- "Y:/abcd-data-release-5.0/abcd-data-release-5.1/core"
+demopath <- "D:/xuxiaoyu/DMRI_network_development/Normative_model/demography"
+filerecord_base <- read.csv(paste0(infopath, "/filerecord_base.csv"))
+filerecord_2year <- read.csv(paste0(infopath, "/filerecord_2year.csv"))
+filerecord_4year <- read.csv(paste0(infopath, "/filerecord_4year.csv"))
+FigureFolderABCD <- 'D:/xuxiaoyu/DMRI_network_development/Normative_model/Figures_ABCD'
+
+```
+
+
+## Step1 Include TD or ADHD
+
+This study included children with either ADHD or TD diagnosis.
+
+ksads-comp
+attention-deficit/hyperactivity disorder Present = 1 (ksads_14_853_p, ksads2_14_809_p), or
+attention-deficit/hyperactivity disorder in partial remission = 1 (ksads_14_855_p, ksads2_14_811_p), or
+Other Specified Attention-Deficit/Hyperactivity Disorder (F90.8) = 1 (ksads2_14_813_p), or
+unspecified attention-deficit/hyperactivity disorder (F90.9) = 1 (ksads_14_856_p).
+
+All the "partial remission", "other specified", and "unspecified" reflected not meet the full criteria for ADHD currently.
+
+Participants with none of 173 types of mental disease will be identified as TD based on parents' reports.
+Regardless of present or past.
+
+The following codes are used for symptoms and diagnoses in the KSADS:
+
+1 = present
+0 = absent
+888 = Question not asked due to primary question response (branching logic)
+555 = Not administered in the assessment
+
+```{r step1_diagnosis}
+## 1. Diagnosed as TD or ADHD
+mh_p_ksads2 <- read.csv(paste0(infopath, "/mh_p_ksads_lab2.csv"))
+mh_p_ksads2[,c("src_subject_id", "eventname")] <- NULL
+ADHD_l_commor <- read.csv(paste0(infopath, "/ADHD_l_commorbidityexclude.csv"))
+
+demo_sublist0 <- mh_p_ksads2 %>% filter(if_TD ==1 | if_ADHD == T)
+demo_sublist0 <- demo_sublist0 %>% filter(eventname2 %in% c("baselineYear1Arm1", "2YearFollowUpYArm1", "4YearFollowUpYArm1"))
+
+# Add commorbidity information
+demo_sublist0 <- demo_sublist0 %>% left_join(select(ADHD_l_commor, scanID, exclude_commorbid1, exclude_commorbid2), by="scanID")
+
+tab <- table(demo_sublist0$if_TD, demo_sublist0$eventname2)
+
+for (i in 1){
+  print(paste("1st, from baseline, we included", tab[1,3], "ADHD children, and", tab[2,3], "TD children."))
+  print(paste("from 2year FU, we included", tab[1,1], "ADHD children, and", tab[2,1], "TD children."))
+  print(paste("from 4year FU, we included", tab[1,2], "ADHD children, and", tab[2,2], "TD children."))
+}
+
+```
+
+
+## Step2 general exclusion by demographic information
+
+We will keep participants from baseline, 2year-follow up, and 4year-follow up.
+Exclusion criteria:
+1)Participants were not proficient in English;
+2)Parents were not proficient in English or Spanish;
+3)Participants with traumatic brain injury history (Mild, moderate, and severe);
+4)Participants with uncorrected visual or auditory deficits;
+5)Participants with intellectual disability;
+6)Participants with major medical or neurological conditions;
+7)Participants with MRI contraindications.
+
+
+```{r step2_excluddemo}
+demo_sublist_criteria <- read.csv(paste0(infopath, "/demo_sublist_criteria.csv"))
+demo_sublist_criteria <- demo_sublist_criteria %>%
+  filter(eventname %in% c("baseline_year_1_arm_1", "2_year_follow_up_y_arm_1", "4_year_follow_up_y_arm_1"))
+
+demo_sublist0 <- demo_sublist0 %>% left_join(demo_sublist_criteria, by="scanID")
+
+demo_sublist <- demo_sublist0 %>% 
+  filter(if_language_y==F &
+         if_language_p==F &
+         if_TBI==F &
+         if_sensory==F &
+         if_intel==F &
+         if_medical==F &
+         if_contra==F &
+         if_age==F &
+         if_gender==F)
+
+num_exclude1_base <- sum(demo_sublist0$eventname2=="baselineYear1Arm1") - sum(demo_sublist$eventname=="baseline_year_1_arm_1")
+num_exclude1_2year <- sum(demo_sublist0$eventname2=="2YearFollowUpYArm1") - sum(demo_sublist$eventname=="2_year_follow_up_y_arm_1")
+num_exclude1_4year <- sum(demo_sublist0$eventname2=="4YearFollowUpYArm1") - sum(demo_sublist$eventname=="4_year_follow_up_y_arm_1")
+num_exclude1 = num_exclude1_base+num_exclude1_2year+num_exclude1_4year
+
+tab <- table(demo_sublist$if_TD, demo_sublist$eventname2)
+
+for (i in 1){
+  print(paste("2nd, based on demographic criteria, we excluded", num_exclude1, "visits in total,", num_exclude1_base, "from baseline,", num_exclude1_2year, "from 2year,", num_exclude1_4year, "from 4year."))
+table(demo_sublist$eventname)
+  print(paste("from baseline, we included", tab[1,3], "ADHD children, and", tab[2,3], "TD children."))
+  print(paste("from 2year FU, we included", tab[1,1], "ADHD children, and", tab[2,1], "TD children."))
+  print(paste("from 4year FU, we included", tab[1,2], "ADHD children, and", tab[2,2], "TD children."))
+}
+
+
+```
+
+
+## Step3 MRI & commorbidity
+1) participants with complete MRI data from 3 visits.
+2) successfully converted to BIDS.
+3) passed official QC.
+4) without commorbidity of schizophrenia (present or past), major depression (present), substance abuse.
+
+```{r step3_completeMRI}
+
+demo_sublist$eventname2 <- gsub("_(.)", "\\U\\1", demo_sublist$eventname, perl = T)
+table(demo_sublist$eventname2)
+demo_sublist$scanID <- paste0(gsub("NDAR_", "sub-NDAR", demo_sublist$src_subject_id),"_ses-", demo_sublist$eventname2)
+demo_sublist <- demo_sublist %>% select(c(names(demo_sublist)[! str_detect(names(demo_sublist), "if_")], "if_ADHD", "if_TD"))
+# rbind filerecords
+filerecord_base$scanID <- paste0(gsub("NDAR_", "sub-NDAR", filerecord_base$src_subject_id),"_ses-", filerecord_base$eventname2)
+filerecord_2year$scanID <- paste0(gsub("NDAR_", "sub-NDAR", filerecord_2year$src_subject_id),"_ses-", filerecord_2year$eventname2)
+filerecord_4year$scanID <- paste0(gsub("NDAR_", "sub-NDAR", filerecord_4year$src_subject_id),"_ses-", filerecord_4year$eventname2)
+ncol4year <- ncol(filerecord_4year)
+filerecord_4year <- cbind(filerecord_4year, data.frame(matrix(NA, nrow(filerecord_4year), ncol(filerecord_2year)-ncol(filerecord_4year))))
+names(filerecord_4year)[(ncol4year+1):ncol(filerecord_2year)] <- setdiff(names(filerecord_2year), names(filerecord_4year)[1:ncol4year])
+filerecord_all <- rbind(filerecord_base, filerecord_2year, filerecord_4year)
+filerecord_all[,c("src_subject_id", "eventname2", "eventname")] <- NULL
+demo_sublist <- merge(demo_sublist, filerecord_all, by="scanID", all.x = T)
+
+## 1. complete raw data
+demo_sublist2 <- demo_sublist %>% filter(dMRI_size>0 & T1WI_size>0 & fmap_size>0)
+# Philips dMRI with less than 102 gradients
+index_P_incomplete <- which(demo_sublist2$scanner=="Philips" & demo_sublist2$philips_gradientnum<102)
+demo_sublist2 <- demo_sublist2[-index_P_incomplete, ]
+num_exclude2_base <- nrow(demo_sublist[demo_sublist$eventname2=="baselineYear1Arm1",]) - nrow(demo_sublist2[demo_sublist2$eventname2=="baselineYear1Arm1",])
+num_exclude2_2year <- nrow(demo_sublist[demo_sublist$eventname2=="2YearFollowUpYArm1",]) - nrow(demo_sublist2[demo_sublist2$eventname2=="2YearFollowUpYArm1",])
+num_exclude2_4year <- nrow(demo_sublist[demo_sublist$eventname2=="4YearFollowUpYArm1",]) - nrow(demo_sublist2[demo_sublist2$eventname2=="4YearFollowUpYArm1",])
+
+tab <- table(demo_sublist2$if_TD, demo_sublist2$eventname2)
+
+for (i in 1){
+  print(paste("3rd,", nrow(demo_sublist2), "have complete MRI data via fasttrack,", num_exclude2_base, "participants were excluded from baseline,", num_exclude2_2year, "participants were excluded from 2year-follow-up,", num_exclude2_4year, "participants were excluded from 4year-follow-up."))
+  print(paste("from baseline, we included", tab[1,3], "ADHD children, and", tab[2,3], "TD children."))
+  print(paste("from 2year FU, we included", tab[1,1], "ADHD children, and", tab[2,1], "TD children."))
+  print(paste("from 4year FU, we included", tab[1,2], "ADHD children, and", tab[2,2], "TD children."))
+}
+
+
+## 2. successful unzip & dcm2nii
+demo_sublist3 <- demo_sublist2 %>% filter(if_bids==T)
+num_exclude3_base <- nrow(demo_sublist2[demo_sublist2$eventname2=="baselineYear1Arm1",]) - nrow(demo_sublist3[demo_sublist3$eventname2=="baselineYear1Arm1",])
+num_exclude3_2year <- nrow(demo_sublist2[demo_sublist2$eventname2=="2YearFollowUpYArm1",]) - nrow(demo_sublist3[demo_sublist3$eventname2=="2YearFollowUpYArm1",])
+num_exclude3_4year <- nrow(demo_sublist2[demo_sublist2$eventname2=="4YearFollowUpYArm1",]) - nrow(demo_sublist3[demo_sublist3$eventname2=="4YearFollowUpYArm1",])
+
+print(paste("4th,", nrow(demo_sublist3), "have been successfully converted to BIDS,", num_exclude3_base, "participants from baseline,", num_exclude3_2year, "participants from 2year-follow-up,", num_exclude3_4year,"participants from 4year-follow-up", "failed unzip or dcm2niix."))
+
+## 3. passed official QC
+mri_y_qc_incl <- read.csv(paste0(release5path, "/imaging/mri_y_qc_incl.csv"))
+demo_sublist4 <- merge(demo_sublist3, mri_y_qc_incl, by=c("src_subject_id", "eventname"), all.x=T)
+demo_sublist4 <- demo_sublist4 %>% filter(imgincl_t1w_include==1 & imgincl_dmri_include==1)
+
+num_exclude4_base <- nrow(demo_sublist3[demo_sublist3$eventname2=="baselineYear1Arm1",]) - nrow(demo_sublist4[demo_sublist4$eventname2=="baselineYear1Arm1",])
+num_exclude4_2year <- nrow(demo_sublist3[demo_sublist3$eventname2=="2YearFollowUpYArm1",]) - nrow(demo_sublist4[demo_sublist4$eventname2=="2YearFollowUpYArm1",])
+num_exclude4_4year <- nrow(demo_sublist3[demo_sublist3$eventname2=="4YearFollowUpYArm1",]) - nrow(demo_sublist4[demo_sublist4$eventname2=="4YearFollowUpYArm1",])
+
+tab <- table(demo_sublist4$if_TD, demo_sublist4$eventname2)
+
+for (i in 1){
+  print(paste("5th,", nrow(demo_sublist4), "passed official QC,", num_exclude4_base, "participants from baseline,", num_exclude4_2year, "participants from 2year-follow-up,",num_exclude4_4year, "participants from 4year-follow-up were excluded due to low imaging quality."))
+  print(paste("from baseline, we included", tab[1,3], "ADHD children, and", tab[2,3], "TD children."))
+  print(paste("from 2year FU, we included", tab[1,1], "ADHD children, and", tab[2,1], "TD children."))
+  print(paste("from 4year FU, we included", tab[1,2], "ADHD children, and", tab[2,2], "TD children."))
+}
+
+
+# 4. finish preprocessing
+demo_sublist_unfinished <- demo_sublist4 %>% filter(qsiprep_finished==0 | schaefer400_7_num != 452)
+demo_sublist_finished <- demo_sublist4 %>% filter(qsiprep_finished==T)
+demo_sublist5_list <- demo_sublist4[,c("src_subject_id", "eventname2", "siteID", "scanner")]
+write.csv(demo_sublist5_list, paste0(infopath, "/demo_sublist5_list.csv"), row.names = F)
+write.csv(demo_sublist4, paste0(infopath, "/demo_sublist4.csv"), row.names = F)
+
+num_exclude5_base <- sum(demo_sublist4$eventname2=="baselineYear1Arm1") - sum(demo_sublist_finished$eventname=="baseline_year_1_arm_1")
+num_exclude5_2year <- sum(demo_sublist4$eventname2=="2YearFollowUpYArm1") - sum(demo_sublist_finished$eventname=="2_year_follow_up_y_arm_1")
+num_exclude5_4year <- sum(demo_sublist4$eventname2=="4YearFollowUpYArm1") - sum(demo_sublist_finished$eventname=="4_year_follow_up_y_arm_1")
+num_exclude5 = num_exclude5_base+num_exclude5_2year+num_exclude5_4year
+
+tab <- table(demo_sublist_finished$if_TD, demo_sublist_finished$eventname2)
+
+for (i in 1){
+  print(paste("6th,", num_exclude5, "visits in total,", num_exclude5_base, "from baseline,", num_exclude5_2year, "from 2year,", num_exclude5_4year, "from 4year failed SC reconstruction."))
+  print(paste("from baseline, we included", tab[1,3], "ADHD children, and", tab[2,3], "TD children."))
+  print(paste("from 2year FU, we included", tab[1,1], "ADHD children, and", tab[2,1], "TD children."))
+  print(paste("from 4year FU, we included", tab[1,2], "ADHD children, and", tab[2,2], "TD children."))
+}
+
+# 5. exclude commorbidity: set2 Schizophrenia, Major Depressive Disorder Present, Substance abuse
+demo_sublist5 <- demo_sublist_finished %>% filter(is.na(exclude_commorbid2) | exclude_commorbid2==F)
+
+num_exclude6_base <- sum(demo_sublist_finished$eventname2=="baselineYear1Arm1") - sum(demo_sublist5$eventname=="baseline_year_1_arm_1")
+num_exclude6_2year <- sum(demo_sublist_finished$eventname2=="2YearFollowUpYArm1") - sum(demo_sublist5$eventname=="2_year_follow_up_y_arm_1")
+num_exclude6_4year <- sum(demo_sublist_finished$eventname2=="4YearFollowUpYArm1") - sum(demo_sublist5$eventname=="4_year_follow_up_y_arm_1")
+num_exclude6 = num_exclude6_base+num_exclude6_2year+num_exclude6_4year
+
+tab <- table(demo_sublist5$if_TD, demo_sublist5$eventname2)
+
+for (i in 1){
+  print(paste("7th, based on commorbidity,", num_exclude6, "visits in total,", num_exclude6_base, "from baseline,", num_exclude6_2year, "from 2year,", num_exclude6_4year, "from 4year."))
+  print(paste("from baseline, we included", tab[1,3], "ADHD children, and", tab[2,3], "TD children."))
+  print(paste("from 2year FU, we included", tab[1,1], "ADHD children, and", tab[2,1], "TD children."))
+  print(paste("from 4year FU, we included", tab[1,2], "ADHD children, and", tab[2,2], "TD children."))
+}
+
+
+# 6. head motion
+demo_sublist6 <- demo_sublist5 %>% filter(meanFD<mean(meanFD,na.rm = T)+3*sd(meanFD,na.rm = T))
+
+num_exclude7_base <- sum(demo_sublist5$eventname2=="baselineYear1Arm1") - sum(demo_sublist6$eventname=="baseline_year_1_arm_1")
+num_exclude7_2year <- sum(demo_sublist5$eventname2=="2YearFollowUpYArm1") - sum(demo_sublist6$eventname=="2_year_follow_up_y_arm_1")
+num_exclude7_4year <- sum(demo_sublist5$eventname2=="4YearFollowUpYArm1") - sum(demo_sublist6$eventname=="4_year_follow_up_y_arm_1")
+num_exclude7 = num_exclude7_base+num_exclude7_2year+num_exclude7_4year
+
+tab <- table(demo_sublist6$if_TD, demo_sublist6$eventname2)
+
+for (i in 1){
+  print(paste("8th, due to exaggerated head motion,", num_exclude7, "visits in total,", num_exclude7_base, "from baseline,", num_exclude7_2year, "from 2year,", num_exclude7_4year, "from 4year."))
+  print(paste("from baseline, we included", tab[1,3], "ADHD children, and", tab[2,3], "TD children."))
+  print(paste("from 2year FU, we included", tab[1,1], "ADHD children, and", tab[2,1], "TD children."))
+  print(paste("from 4year FU, we included", tab[1,2], "ADHD children, and", tab[2,2], "TD children."))
+}
+
+
+```
+
+
+## Step3 merge demographic information
+
+
+```{r merge_demo}
+demo_sublist6 <- demo_sublist6 %>% select(!(contains("size") | contains("num") | contains("include") | contains("nii")))
+demo_sublist6$siteID_r <- demo_sublist6$scanner_manufacturer_pd <- NULL
+
+# age & sex
+abcd_p_demo <- read.csv(paste0(release5path,'/abcd-general/abcd_p_demo.csv'))
+demo_sublist6$age <- demo_sublist6$interview_age / 12
+demo_sublist6 <- demo_sublist6 %>% left_join(select(abcd_p_demo, c("src_subject_id", "demo_sex_v2")), by="src_subject_id", multiple="first")
+
+# handedness
+nc_y_ehis <- read.csv(paste0(release5path, '/neurocognition/nc_y_ehis.csv'))
+demo_sublist6 <- demo_sublist6 %>% left_join(select(nc_y_ehis, c("src_subject_id", "ehi_y_ss_scoreb")), join_by("src_subject_id"), multiple="first")
+
+
+# cognition
+nc_y_nihtb <- read.csv(paste0(release5path, '/neurocognition/nc_y_nihtb.csv'))
+interest_cogvar <- c("src_subject_id", "eventname","nihtbx_flanker_uncorrected", "nihtbx_list_uncorrected", "nihtbx_cardsort_uncorrected", "nihtbx_pattern_uncorrected", "nihtbx_fluidcomp_uncorrected", "nihtbx_cryst_uncorrected", "nihtbx_totalcomp_uncorrected")
+demo_sublist6 <- demo_sublist6 %>% left_join(select(nc_y_nihtb, all_of(interest_cogvar)), by=join_by(src_subject_id, eventname))
+
+# merge pfactor
+pFactor <- read.csv(paste0(infopath,"/p.factor/BifactorP_baseTo4Year.csv"))
+pFactor$eventname2 <- gsub("_", "", pFactor$eventname)
+pFactor$eventname <- NULL
+demo_sublist7 <- merge(demo_sublist6, pFactor, by.x=c("src_subject_id", "eventname2"), by.y=c("srcsubjectid", "eventname2"), all.x=T)
+
+# merge ADHD 2 dimension
+ADHD2dim <- read.csv(paste0(infopath,"/ADHDsymptomDim/ADHD2dim_baseTo4Year.csv"))
+ADHD2dim$eventname2 <- gsub("_", "", ADHD2dim$eventname)
+ADHD2dim$eventname <- NULL
+demo_sublist7 <- merge(demo_sublist7, ADHD2dim, by.x=c("src_subject_id", "eventname2"), by.y=c("srcsubjectid", "eventname2"), all.x=T)
+
+# CBCL
+mh_p_cbcl <- read.csv(paste0(release5path, "/mental-health/mh_p_cbcl.csv"))
+mh_p_cbcl <- mh_p_cbcl %>% select(c("src_subject_id", "eventname", ends_with("_r"), ends_with("_t")))
+demo_sublist7 <- merge(demo_sublist7, mh_p_cbcl, by=c("src_subject_id", "eventname"), all.x=T)
+
+
+# SES
+abcd_p_demo <- read.csv(paste0(release5path,'/abcd-general/abcd_p_demo.csv'))
+demo_sublist7 <- demo_sublist7 %>% left_join(select(abcd_p_demo, c("src_subject_id", "eventname", "demo_comb_income_v2", "demo_roster_v2", "demo_comb_income_v2_l", "demo_roster_v2_l")), join_by("src_subject_id", "eventname"))
+demo_sublist7 <- demo_sublist7 %>%
+  group_by(src_subject_id) %>%
+  mutate(demo_comb_income_v2 = coalesce(demo_comb_income_v2, demo_comb_income_v2_l)) %>%
+  mutate(demo_roster_v2 = coalesce(demo_roster_v2, demo_roster_v2_l)) %>%
+  ungroup()
+demo_sublist7$demo_comb_income_v2_l <- demo_sublist7$demo_roster_v2_l <- NULL
+demo_sublist7$totalincome <- dplyr::recode(demo_sublist7$demo_comb_income_v2, 
+                                      `1` = 2500, `2` = 8500, `3` = 13999.5, `4` = 20499.5, `5` = 29999.5, `6` = 42499.5, `7` = 62499.5, `8` = 87499.5, `9` = 149999.5, `10` = 200000)
+demo_sublist7$interviewYear<-substr(demo_sublist7$interview_date,start=nchar(demo_sublist7$interview_date)-3, stop=nchar(demo_sublist7$interview_date))
+demo_sublist7$interviewYear=as.numeric(demo_sublist7$interviewYear)
+reference_data <- data.frame(familysize = rep(c(1:12),7),
+                             povertyline = c(11880,16020,20160,24300,28440,32580,36730,40890,seq(from=45050, to=(45050+4160*3), by=4160), 12140,16460,20780,25100,29420,33740,38060,42380, 46700,51020,	55340,	59660, 12060,16240,20420,24600,28780,32960,37140,41320, 45500,	49680,	53860,	58040,12490,	16910,	21330,	25750,	30170,	34590,	39010,	43430,	47850,	52270,	56690,	61110,seq(from=12760, to=(12760+4480*11), by=4480), seq(from=12880, to=(12880+4540*11), by=4540), seq(from=12880, to=(13590+4720*11), by=4720)),Year = c(rep(2016,12),rep(2018,12), rep(2017,12), rep(2019,12),rep(2020,12),rep(2021,12),rep(2022,12)))
+demo_sublist7 <- merge(demo_sublist7, reference_data,
+                          by.x = c("interviewYear", "demo_roster_v2"),
+                          by.y = c("Year", "familysize"), 
+                          all.x = TRUE)
+demo_sublist7$income.adj<-demo_sublist7$totalincome / demo_sublist7$povertyline
+summary(demo_sublist7$income.adj)
+
+# race
+abcd_p_demo <- read.csv(paste0(release5path,'/abcd-general/abcd_p_demo.csv'))
+abcd_p_demo <- abcd_p_demo %>%
+  mutate(race_ethnicity = if_else(eventname == "baseline_year_1_arm_1" & is.na(race_ethnicity), 0, race_ethnicity))
+abcd_p_demo <- abcd_p_demo %>% group_by(src_subject_id) %>% 
+  mutate(race_ethnicity = zoo::na.locf(race_ethnicity)) %>%
+  mutate(race_ethnicity = zoo::na.locf(race_ethnicity, fromLast = TRUE, na.rm = F))
+abcd_p_demo$race_ethnicity <- as.factor(abcd_p_demo$race_ethnicity)
+
+# 1 = White; 2 = Black; 3 = Hispanic; 4 = Asian; 5 = Other; 0=NA
+demo_sublist7 <- demo_sublist7 %>% left_join(select(abcd_p_demo, c("src_subject_id", "eventname", "race_ethnicity")), join_by("src_subject_id", "eventname"))
+demo_sublist7$race_ethnicity <- factor(demo_sublist7$race_ethnicity, levels=c(0:5), labels=c("NA","White", "Black", "Hispanic", "Asian", "Other"))
+summary(demo_sublist7$race_ethnicity)
+
+#### Regress out age and gender
+# merge data
+capitalize_after_underscore <- function(text) {
+  str_replace_all(text, "_([a-z])", function(x) toupper(x))
+}
+
+pFactor <- pFactor %>% left_join(select(abcd_p_demo, src_subject_id, demo_sex_v2), join_by(srcsubjectid==src_subject_id), multiple="first")
+abcd_y_lt <- read.csv(paste0(release5path,'/abcd-general/abcd_y_lt.csv'))
+for (i in 1:nrow(abcd_y_lt)){
+  abcd_y_lt$eventname3[i] <- capitalize_after_underscore(abcd_y_lt$eventname[i])
+}
+
+abcd_y_lt$eventname2 <- gsub("_", "", abcd_y_lt$eventname3)
+pFactor <- pFactor %>% left_join(select(abcd_y_lt, src_subject_id, eventname2, interview_age), join_by(srcsubjectid==src_subject_id, eventname2==eventname2))
+pFactor$demo_sex_v2 <- as.factor(pFactor$demo_sex_v2)
+pFactor$interview_age <- as.numeric(pFactor$interview_age)
+
+ADHD2dim <- ADHD2dim %>% left_join(select(abcd_p_demo, src_subject_id, demo_sex_v2), join_by(srcsubjectid==src_subject_id), multiple="first")
+ADHD2dim <- ADHD2dim %>% left_join(select(abcd_y_lt, src_subject_id, eventname2, interview_age), join_by(srcsubjectid==src_subject_id, eventname2==eventname2))
+ADHD2dim$demo_sex_v2 <- as.factor(ADHD2dim$demo_sex_v2)
+ADHD2dim$interview_age <- as.numeric(ADHD2dim$interview_age)
+
+## norm model
+pFactor <- pFactor %>% drop_na(GENERAL, EXT, ADHD, INT, interview_age,demo_sex_v2 , srcsubjectid)
+gam.p.factor <- gamm4(GENERAL~s(interview_age, k=3, fx=T)+demo_sex_v2, random=~(1|srcsubjectid), REML=TRUE, data = pFactor)
+pFactor$GENERAL.norm <- scale((gam.p.factor$gam$y - gam.p.factor$gam$fitted.values)) 
+gam.EXT <- gamm4(EXT~s(interview_age, k=3, fx=T)+demo_sex_v2, random=~(1|srcsubjectid), REML=TRUE, data = pFactor)
+pFactor$EXT.norm <- scale((gam.EXT$gam$y - gam.EXT$gam$fitted.values)) 
+gam.ADHD <- gamm4(ADHD~s(interview_age, k=3, fx=T)+demo_sex_v2, random=~(1|srcsubjectid), REML=TRUE, data = pFactor)
+pFactor$ADHD.norm <- scale((gam.ADHD$gam$y - gam.ADHD$gam$fitted.values)) 
+gam.INT <- gamm4(INT~s(interview_age, k=3, fx=T)+demo_sex_v2, random=~(1|srcsubjectid), REML=TRUE, data = pFactor)
+pFactor$INT.norm <- scale((gam.INT$gam$y - gam.INT$gam$fitted.values)) 
+
+ADHD2dim <- ADHD2dim %>% drop_na(ATT, HI, interview_age,demo_sex_v2 , srcsubjectid)
+gam.ATT <- gamm4(ATT~s(interview_age, k=3, fx=T)+demo_sex_v2, random=~(1|srcsubjectid), REML=TRUE, data = ADHD2dim)
+ADHD2dim$ATT.norm <- scale((gam.ATT$gam$y - gam.ATT$gam$fitted.values)) 
+gam.HI <- gamm4(HI~s(interview_age, k=3, fx=T)+demo_sex_v2, random=~(1|srcsubjectid), REML=TRUE, data = ADHD2dim)
+ADHD2dim$HI.norm <- scale((gam.HI$gam$y - gam.HI$gam$fitted.values)) 
+
+demo_sublist7 <- demo_sublist7 %>% left_join(select(pFactor, srcsubjectid, eventname2, GENERAL.norm, EXT.norm, ADHD.norm, INT.norm), join_by(src_subject_id==srcsubjectid, eventname2==eventname2))
+demo_sublist7 <- demo_sublist7 %>% left_join(select(ADHD2dim, srcsubjectid, eventname2, ATT.norm, HI.norm), join_by(src_subject_id==srcsubjectid, eventname2==eventname2))
+
+## Symptom table
+ADHD2dim$demo_sex_v2 <- ADHD2dim$interview_age <- NULL
+Symp.all <- merge(pFactor, ADHD2dim, by=c("srcsubjectid", "eventname2"))
+for (i in 1:nrow(mh_p_cbcl)){
+  mh_p_cbcl$eventname3[i] <- capitalize_after_underscore(mh_p_cbcl$eventname[i])
+}
+mh_p_cbcl$eventname2 <- gsub("_", "", mh_p_cbcl$eventname3)
+mh_p_cbcl$eventname3 <- mh_p_cbcl$eventname <- NULL
+Symp.all <- merge(Symp.all, mh_p_cbcl, by.x = c("srcsubjectid", "eventname2"), by.y = c("src_subject_id", "eventname2"))
+write.csv(Symp.all, paste0(demopath, "/Symptoms_allsample.csv"), row.names = F)
+
+
+demo_sublist7[,c("GENERAL.norm", "EXT.norm", "ADHD.norm", "INT.norm", "ATT.norm", "HI.norm")] <- lapply(demo_sublist7[,c("GENERAL.norm", "EXT.norm", "ADHD.norm", "INT.norm", "ATT.norm", "HI.norm")], as.numeric)
+summary(demo_sublist7[,c("GENERAL.norm", "EXT.norm", "ADHD.norm", "INT.norm", "ATT.norm", "HI.norm")])
+# write out
+write.csv(demo_sublist7, paste0(demopath, "/demo_sublist7.csv"), row.names = F)
+
+```
+
+## 2. age distribution plots and demographic tables.
+
+```{r plots}
+fillcolor = brewer.pal(3, "Paired")
+demo_sublist7$eventname2 <- factor(demo_sublist7$eventname2, levels=c("baselineYear1Arm1", "2YearFollowUpYArm1", "4YearFollowUpYArm1"))
+demo_sublist7$if_ADHD <- factor(demo_sublist7$if_ADHD, levels=c(TRUE, FALSE), labels=c("ADHD", "TD"))
+
+print(paste(length(which(table(demo_sublist7$subID)==3)), "participants have 3 visits,", length(which(table(demo_sublist7$subID)==2)), "participants have 2 visits."))
+print(paste(length(unique(demo_sublist7$subID)), "participants in total."))
+
+
+## Plot the age distribution for ADHD and TD
+################
+fillcolor = brewer.pal(3, "Paired")[c(2, 1, 3)]
+
+ggplot(data = demo_sublist7, aes(age, y = ..count.., fill = eventname2)) +
+  geom_histogram(binwidth = 0.5, color = "black", position = "stack",linewidth=0.5) +
+  facet_wrap(~if_ADHD, ncol = 1, nrow = 2, scales = "free") +
+  labs(x = "Age (years)", y = NULL) +
+  #scale_x_continuous(limits = c(9, 16), breaks = c(9,10,11,12,13,14,15,16)) +
+  #scale_y_continuous(limits = c(0, 50), breaks = c(0,10, 20,30,40, 50)) +
+  scale_fill_manual(values = rep(fillcolor,2))+
+  #geom_hline(aes(yintercept = 10), colour = "red", linetype="dashed")+
+  theme_classic()+
+  theme(panel.background = element_rect(fill="transparent"),
+        plot.background = element_rect(fill = "transparent",colour = NA),aspect.ratio = 0.5,
+        plot.title = element_text(color = "black", size = 14, hjust = 0.5),
+        strip.text = element_text(size = 14, color = "black"),
+        strip.background = element_rect(fill = "transparent",colour = NA),
+        axis.title = element_text(color = "black", size = 14),axis.line = element_line(linewidth = 0.4),
+        axis.ticks = element_line(linewidth = 0.4),
+        axis.text = element_text(color = "black", size = 14), 
+        legend.text = element_text(color = "black", size = 12),
+        legend.title = element_text(color = "black", size = 12))
+
+ggsave(paste(FigureFolderABCD, '/Fig1_Age_distribution_count_ABCD_ADHDall.tiff', sep = ''),  width = 20, height = 20, units = "cm")
+ggsave(paste(FigureFolderABCD, '/Fig1_Age_distribution_count_ABCD_ADHDall.svg', sep = ''), width = 20, height = 20, units = "cm")
+
+## Description for demographic information
+ABCD_vars <- c("age", "demo_sex_v2","eventname", "ehi_y_ss_scoreb", "race_ethnicity", "meanFD", "nihtbx_fluidcomp_uncorrected","GENERAL", "siteID","income.adj","adhd_medication", names(mh_p_cbcl)[3:42])
+ABCD_tableone <- CreateTableOne(ABCD_vars,strata=c("if_ADHD", "eventname"), data = demo_sublist7, factorVars=c("demo_sex_v2", "ehi_y_ss_scoreb", "race_ethnicity", "siteID", "adhd_medication"), test=F)
+invisible(ABCD_tableone <- as.data.frame(print(ABCD_tableone)))
+write.csv(ABCD_tableone, paste0(FigureFolderABCD, '/MRIdemographic_info_ADHDvsTD.csv'))
+
+
+
+```
+
+
+
+

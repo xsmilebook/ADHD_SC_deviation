@@ -1,0 +1,388 @@
+---
+title: "hbn_exclusion_demo"
+output: html_document
+date: "2025-03-24"
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(psych)
+library(MplusAutomation)
+library(rjson)
+library(openxlsx)
+library(R.matlab)
+library(tableone)
+result_path <- "D:/xuxiaoyu/DMRI_network_development/Normative_model/demography"
+demo_path <- "D:/xuxiaoyu/open_dataset_information/HBN/phenotype_data"
+outputpath <- "D:/xuxiaoyu/DMRI_network_development/Normative_model/demography"
+FigureFolderHBN <- "D:/xuxiaoyu/DMRI_network_development/Normative_model/Figures_HBN"
+basic_demo <- read.csv(paste0(demo_path, "/basic_demo.csv"))
+basic_demo <- basic_demo %>% select(c("Identifiers", "assessment.Basic_Demos.Age", "assessment.Basic_Demos.Sex", "assessment.Basic_Demos.Study_Site")) %>% drop_na()
+names(basic_demo) <- c("subID", "age", "sex", "site")
+allnum <- nrow(basic_demo)
+```
+
+## Minimal exclusion criteria
+
+Across recruitment sites, inclusion criteria consisted of being in the required age range and able to provide informed consent (parents) and assent (child). Exclusions were minimal and were limited to lack of English language proficiency in the children, the presence of severe sensory, intellectual, medical or neurological issues that would impact the validity of collected data or the child’s ability to comply with the protocol, and contraindications to MRI scanning ([Garavan et al., 2018](https://www.sciencedirect.com/science/article/pii/S1878929317301809)). Parents must be fluent in either English or Spanish.
+
+
+### 1) dMRI QC
+
+```{r dMRIQC_POD2}
+allnum1 <- nrow(basic_demo)
+QCtable <- read.csv(paste0(demo_path, "/participants.csv"))
+basic_demo$subID <- paste0("sub-", basic_demo$subID)
+basic_demo <- merge(basic_demo, QCtable, by.x="subID", by.y="subject_id")
+basic_demo$age.y <- basic_demo$sex.y <- NULL
+basic_demo <- dplyr::rename(basic_demo, all_of(c(age="age.x", sex="sex.x")))
+
+allnum2 <- nrow(basic_demo)
+print(paste((allnum1-allnum2), "participants were excluded due to unsuccessful qsiprep or missing files as reported in Richie-Halford et al., 2022.", allnum2, "left."))
+
+basic_demo <- basic_demo %>% filter(dl_qc_score > 0.05, scan_site_id!="SI", (site_variant %in% c("CBIC_64dir_Most_Common", "CBIC_64dir_Obliquity", "CBIC_ABCD64dir_Most_Common", "CBIC_ABCD64dir_MultibandAccelerationFactor", "CUNY_64dir_Most_Common", "CUNY_64dir_Obliquity", "RU_64dir_Most_Common", "RU_64dir_Obliquity")))
+allnum3 <- nrow(basic_demo)
+print(paste((allnum2-allnum3), "participants were excluded due to low QC & 1.5T MRI.", allnum3, "left."))
+
+QCjson <- rjson::fromJSON(file=paste0(demo_path, "/dwiqc.json"))
+QCjson <- QCjson$subjects
+QCtable <- data.frame(matrix(NA, 2135, 2))
+names(QCtable) <- c("subID", "mean_fd")
+
+for (i in 1:2135){
+  QCtable$subID[i] <- QCjson[[i]]$participant_id
+  QCtable$mean_fd[i] <- QCjson[[i]]$mean_fd
+}
+
+QCtable.exclude <- QCtable %>% filter(mean_fd > mean(mean_fd)+3*sd(mean_fd))
+basic_demo <- basic_demo %>% filter(! subID %in% QCtable.exclude$subID) %>% left_join(QCtable, by="subID")
+allnum4 <- nrow(basic_demo)
+print(paste((allnum3-allnum4), "participants were excluded due to excessive head motion.", allnum4, "left."))
+
+
+```
+
+
+### 2) Language
+Because participants were enrolled with criteria of being fluent in English.
+So no more exclusion for language issues in this study.
+
+### 3) Traumatic brain injury history
+Have been knocked out
+TBI_01 = 1
+A knocked out happened.
+TBI_05_effect / TBI_06_effect / TBI_07_effect / TBI_08_effect / TBI_09_effect / TBI_10_effect == 2
+
+```{r TBI}
+TBI <- read.csv(paste0(demo_path, "/TBI.csv"))
+TBI.exclude <- TBI %>% filter(TBI.TBI_01 == 1 & (TBI.TBI_05_effect==2 | TBI.TBI_06_effect==2 | TBI.TBI_07_effect==2 | 
+                                           TBI.TBI_08_effect==2 | TBI.TBI_09_effect==2 | TBI.TBI_10_effect==2))
+
+basic_demo <- basic_demo %>% filter(! subID %in% paste0("sub-", TBI.exclude$TBI.EID))
+allnum5 <- nrow(basic_demo)
+print(paste((allnum4-allnum5), "participants were excluded due to mild or more severe TBI.", allnum5, "left."))
+
+```
+### 4) Sensory issues
+The exclusion criteria of HBN including hearing or visual impairment that prevents participation in study-released tasks. No more exclusion for sensory issues in this study.
+
+### 5) Intellectual disability
+```{r IQ}
+WISC <- read.csv(paste0(demo_path, "/WISC.csv"))
+WISC_remote <- read.csv(paste0(demo_path, "/WISC_remote.csv"))
+WAIS <- read.csv(paste0(demo_path, "/WAIS.csv"))
+WAIS_Abb <- read.csv(paste0(demo_path, "/WAIS_Abb.csv"))
+
+WISC.exclude <- WISC %>% filter(WISC.WISC_FSIQ < 70)
+WISC_remote.exclude <- WISC_remote %>% filter(WISC_Remote.WISC_NMFSIQ < 70)
+WAIS.excludde <- WAIS %>% filter(WAIS.WAIS_FSIQ_COMP < 70)
+
+basic_demo <- basic_demo %>% filter(! subID %in% paste0("sub-", c(WISC.exclude$WISC.EID, WISC_remote.exclude$WISC_Remote.EID, WAIS.excludde$WAIS.EID)))
+allnum6 <- nrow(basic_demo)
+print(paste((allnum5-allnum6), "participants were excluded due to intellectual disability.", allnum6, "left."))
+
+```
+### 6) Major medical or neurological conditions
+The exclusion criteria of HBN including serious neurological disorders; acute encephalopathy caused by an injury to the brain or disease; known neurodegenerative disorder; recent diagnosis of Schizophrenia, Schizoaffective Disorder, or Bipolar Disorder; manic or psychotic episode within the past 6 months without current, ongoing treatment.
+In addition, detailed physical medical conditions were not provided in HBN, no more exclusion was performed for major medical or neurological conditions in this study.
+
+
+### 7) Age & Sex
+
+```{r agesex}
+basic_demo$sex <- as.factor(basic_demo$sex)
+summary(basic_demo[, c("age", "sex")])
+basic_demo <- basic_demo %>% drop_na(c("age", "sex"))
+allnum7 <- nrow(basic_demo)
+print(paste((allnum6-allnum7), "participants were excluded due to missing age or sex information.", allnum7, "left."))
+write.csv(basic_demo, paste0(outputpath, "/HBN_demolist.csv"), row.names = F)
+```
+
+### 8) diagnosis
+
+```{r}
+Consensus <- read.csv(paste0(demo_path, "/Diagnosis_ClinicianConsensus.csv"))
+names(Consensus) <- gsub("Diagnosis_ClinicianConsensus.","", names(Consensus))
+diagnosisvar <- paste0("DX_", sprintf("%02d", 1:10))
+# ADHD
+ADHDlabel <- Consensus$DX_01[c(grep("ADHD", Consensus$DX_01),grep("Attention", Consensus$DX_01))]
+ADHDlabel <- unique(ADHDlabel)
+print(ADHDlabel)
+Consensus <- Consensus %>% mutate(
+  if_ADHD = if_any(
+    any_of(diagnosisvar),
+    ~ str_detect(., regex(paste(ADHDlabel, collapse = "|"), ignore_case = TRUE))
+  ) %>% as.integer()
+)
+table(Consensus$if_ADHD)
+# TD
+TDlabel <- "No Diagnosis Given"
+Consensus <- Consensus %>% mutate(
+  if_TD = if_any(
+    any_of(diagnosisvar),
+    ~ . ==TDlabel)
+)
+table(Consensus$if_TD)
+## Commorbidity: schizophrenia, major depressive disorder present, substance abuse, ASD
+Commlabel <- Consensus$DX_01[c(grep("Schizophrenia", Consensus$DX_01),grep("Major Depressive Disorder", Consensus$DX_01), grep("Autism", Consensus$DX_01), grep("Alcohol", Consensus$DX_01))]
+Commlabel <- unique(Commlabel)
+print(Commlabel)
+Consensus <- Consensus %>% mutate(
+  if_Commorbidity = if_any(
+    any_of(diagnosisvar),
+    ~ . %in% Commlabel)
+)
+table(Consensus$if_Commorbidity)
+
+# We only keep subjects diagnosed as ADHD or TD and not diagnosed as any disease in commorbidity list.
+Consensus.keep <- Consensus %>% filter(
+  (if_ADHD == 1 & if_Commorbidity==F) | if_TD==T
+)
+Consensus.keep$subID <- paste0("sub-", gsub(",assessment", "", Consensus.keep$Identifiers))
+
+basic_demo <- basic_demo %>% left_join(select(Consensus.keep, subID, if_ADHD, if_TD), by="subID")
+basic_demo2 <- basic_demo %>% filter(if_ADHD == 1 | if_TD==T)
+
+allnum8 <- nrow(basic_demo2)
+print(paste((allnum7-allnum8), "participants were excluded due to not match the diagnosis.", allnum8, "containing ", table(basic_demo2$if_ADHD)[2], " ADHD children left."))
+
+```
+
+### 8) qsirecon success
+
+```{r qsirecon}
+## subjects with qsiprep finished.
+subjectsfinished <- readMat(paste0(demo_path, "/sublist_finished_qsi.mat"))
+subjectsfinished <- subjectsfinished$sublist.finished
+subjectsfinished.vec <- unlist(lapply(subjectsfinished, unlist))
+
+subjectsunfinished <- readMat(paste0(demo_path, "/sublist_unfinished_qsi.mat"))
+subjectsunfinished <- subjectsunfinished$sublist.unfinished
+subjectsunfinished.vec <- unlist(lapply(subjectsunfinished, unlist))
+basic_demo2$qsiprep_finished <- ((!(basic_demo2$subID %in% subjectsunfinished.vec)) & (basic_demo2$subID %in% subjectsfinished.vec))
+summary(basic_demo2$qsiprep_finished)
+write.csv(basic_demo2, paste0(result_path, "/basic_demo_screenqsirecon.csv"), row.names = F)
+basic_demo2 <- basic_demo2 %>% filter(qsiprep_finished==T)
+basic_demo2 <- basic_demo2 %>% filter(subID != "sub-NDARPD568LHV")
+allnum9 <- nrow(basic_demo2)
+print(paste(sum(basic_demo2$qsiprep_finished), "SC matrices were successfully reconstructed.", (allnum8-allnum9), "participants failed."))
+
+```
+
+
+### Merge handedness
+
+```{r handedness}
+EHQ <- read.csv(paste0(demo_path, "/EHQ.csv"))
+EHQ <- EHQ %>% mutate(
+  handedness=case_when(
+    EHQ.EHQ_Total < -60 ~ "left",
+    EHQ.EHQ_Total >= -60 & EHQ.EHQ_Total <= 60  ~ "mixed",
+    EHQ.EHQ_Total > 60 ~ "right"
+  )
+)
+EHQ$EHQ.EID <- paste0("sub-", EHQ$EHQ.EID)
+basic_demo2 <- basic_demo2 %>% left_join(select(EHQ, c("EHQ.EID", "handedness")), join_by(subID==EHQ.EID))
+basic_demo2$handedness <- as.factor(basic_demo2$handedness)
+summary(basic_demo2$handedness)
+```
+### Merge race
+
+```{r race}
+PreInt_Demos_Fam <- read.csv(paste0(demo_path, "/PreInt_Demos_Fam.csv"))
+PreInt_Demos_Fam <- PreInt_Demos_Fam %>% mutate(
+  race_ethnicity=case_when(
+    PreInt_Demos_Fam.Child_Ethnicity==1 ~ "Hispanic",
+    PreInt_Demos_Fam.Child_Ethnicity!=1 & PreInt_Demos_Fam.Child_Race==0 ~ "White",
+    PreInt_Demos_Fam.Child_Ethnicity!=1 & PreInt_Demos_Fam.Child_Race==1 ~ "Black",
+    PreInt_Demos_Fam.Child_Ethnicity!=1 & PreInt_Demos_Fam.Child_Race==3 ~ "Asian",
+    PreInt_Demos_Fam.Child_Ethnicity!=1 & PreInt_Demos_Fam.Child_Race>3~ "Other"
+  )
+)
+PreInt_Demos_Fam$PreInt_Demos_Fam.EID <- paste0("sub-", PreInt_Demos_Fam$PreInt_Demos_Fam.EID)
+basic_demo2 <- basic_demo2 %>% left_join(select(PreInt_Demos_Fam, c("PreInt_Demos_Fam.EID", "race_ethnicity")), join_by(subID==PreInt_Demos_Fam.EID))
+basic_demo2$race_ethnicity <- as.factor(basic_demo2$race_ethnicity)
+summary(basic_demo2$race_ethnicity)
+
+```
+
+### Merge cognition
+
+```{r cognition}
+## basic_demo data clean
+cognitiondf <- read.csv(paste0(demo_path, "/basic_demo.csv"))
+cognitiondf <- cognitiondf %>% select(c("Identifiers", "assessment.Basic_Demos.Age", "assessment.Basic_Demos.Sex", "assessment.Basic_Demos.Study_Site")) %>% drop_na()
+names(cognitiondf) <- c("subID", "age", "sex", "site")
+cognitiondf <- cognitiondf %>% filter(! subID %in% TBI.exclude$TBI.EID)
+cognitiondf <- cognitiondf %>% filter(! subID %in% c(WISC.exclude$WISC.EID, WISC_remote.exclude$WISC_Remote.EID, WAIS.excludde$WAIS.EID))
+cognitiondf$subID <- paste0("sub-", cognitiondf$subID)
+
+NIH_final <- read.csv(paste0(demo_path, "/NIH_final.csv"))
+NIH_score <- read.csv(paste0(demo_path, "/NIH_score.csv"))
+NIH <- read.csv(paste0(demo_path, "/NIH.csv"))
+
+NIH_final$NIH_final.EID <- paste0("sub-", NIH_final$NIH_final.EID)
+NIH$NIH.EID <- paste0("sub-", NIH$NIH.EID)
+NIH_score$NIH_Scores.EID <- paste0("sub-", NIH_score$NIH_Scores.EID)
+# NIH_final
+cognitiondf <- cognitiondf %>% left_join(select(NIH_final, c(ends_with("_Uncorr_Stnd"), ends_with("_Age_Corr_Stnd"), "NIH_final.EID")), join_by(subID==NIH_final.EID))
+# NIH_score
+cognitiondf <- cognitiondf %>% left_join(select(NIH_score, c("NIH_Scores.NIH7_Comp", "NIH_Scores.EID")), join_by(subID==NIH_Scores.EID))
+# NIH
+cognitiondf <- cognitiondf %>% left_join(select(NIH, c(ends_with("_Uncorr_Stnd"), ends_with("_Age_Corr_Stnd"), "NIH.EID")), join_by(subID==NIH.EID))
+
+#summary(basic_demo[,c("NIH.NIH_Picture_Seq_Uncorr_Stnd", "NIH.NIH_List_Sort_Uncorr_Stnd", "NIH.NIH_Processing_Uncorr_Stnd", "NIH.NIH_Flanker_Uncorr_Stnd", "NIH.NIH_Card_Sort_Uncorr_Stnd")])
+#summary(basic_demo[,c("NIH_final.NIH_Picture_Seq_Uncorr_Stnd", "NIH_final.NIH_List_Sort_Uncorr_Stnd", "NIH.NIH_Processing_Uncorr_Stnd", "NIH.NIH_Flanker_Uncorr_Stnd", "NIH_final.NIH_Card_Sort_Uncorr_Stnd")])
+
+cognitiondf <- cognitiondf %>% 
+  mutate(NIH_final.NIH_Picture_Seq_Uncorr_Stnd = if_else(is.na(NIH_final.NIH_Picture_Seq_Uncorr_Stnd), NIH.NIH_Picture_Seq_Uncorr_Stnd, NIH_final.NIH_Picture_Seq_Uncorr_Stnd),
+         NIH_final.NIH_List_Sort_Uncorr_Stnd = if_else(is.na(NIH_final.NIH_List_Sort_Uncorr_Stnd), NIH.NIH_List_Sort_Uncorr_Stnd, NIH_final.NIH_List_Sort_Uncorr_Stnd),
+         NIH_final.NIH_Processing_Uncorr_Stnd = if_else(is.na(NIH_final.NIH_Processing_Uncorr_Stnd), NIH.NIH_Processing_Uncorr_Stnd, NIH_final.NIH_Processing_Uncorr_Stnd),
+         NIH_final.NIH_Flanker_Uncorr_Stnd = if_else(is.na(NIH_final.NIH_Flanker_Uncorr_Stnd), NIH.NIH_Flanker_Uncorr_Stnd, NIH_final.NIH_Flanker_Uncorr_Stnd),
+         NIH_final.NIH_Card_Sort_Uncorr_Stnd = if_else(is.na(NIH_final.NIH_Card_Sort_Uncorr_Stnd), NIH.NIH_Card_Sort_Uncorr_Stnd, NIH_final.NIH_Card_Sort_Uncorr_Stnd)
+         )
+
+#summary(basic_demo[,c("NIH_final.NIH_Picture_Seq_Uncorr_Stnd", "NIH_final.NIH_List_Sort_Uncorr_Stnd", "NIH.NIH_Processing_Uncorr_Stnd", "NIH.NIH_Flanker_Uncorr_Stnd", "NIH_final.NIH_Card_Sort_Uncorr_Stnd")])
+
+# NIH_final.NIH_Card_Sort_Uncorr_Stnd, NIH_final.NIH_Flanker_Uncorr_Stnd, NIH_final.NIH_List_Sort_Uncorr_Stnd, 
+# NIH_final.NIH_Picture_Seq_Uncorr_Stnd
+cogvars <- c("NIH_final.NIH_Card_Sort_Uncorr_Stnd", "NIH_final.NIH_Flanker_Uncorr_Stnd", "NIH_final.NIH_List_Sort_Uncorr_Stnd", 
+             "NIH_final.NIH_Processing_Uncorr_Stnd")
+Behavior_cog <- cognitiondf %>% select(c(cogvars, "subID")) %>% drop_na()
+EFPCA <- prcomp(Behavior_cog[,1:4], scale. = TRUE)
+summary(EFPCA)
+# Importance of components:
+#                           PC1    PC2     PC3     PC4
+# Standard deviation     1.6720 0.6721 0.62788 0.59856
+# Proportion of Variance 0.6989 0.1129 0.09856 0.08957
+# Cumulative Proportion  0.6989 0.8119 0.91043 1.00000
+
+Behavior_cog$EFPCA <- -EFPCA$x[,1]
+basic_demo2 <- basic_demo2 %>% left_join(select(Behavior_cog, c("EFPCA", "subID")), by="subID")
+
+```
+
+### Merge SES
+
+```{r SES}
+FSQ <- read.csv(paste0(demo_path, "/FSQ.csv"))
+FSQ$totalincome <- dplyr::recode(FSQ$FSQ.FSQ_04, `0` = 5000,
+  `1` = 15000, `2` = 25000, `3` = 35000, `4` = 45000, `5` = 55000, `6` = 65000, `7` = 75000, `8` = 85000, `9` = 95000, `10` = 125000, `11` = 175000)
+
+reference_data <- data.frame(familysize = rep(c(1:12),7),
+                             povertyline = c(11880,16020,20160,24300,28440,32580,36730,40890, 
+                                             seq(from=45050, to=(45050+4160*3), by=4160), 12140,16460,20780,25100,29420,33740,38060,42380, 46700,51020,	55340,	59660, 12060,16240,20420,24600,28780,32960,37140,41320, 45500,	49680,	53860,	58040,12490,	16910,	21330,	25750,	30170,	34590,	39010,	43430,	47850,	52270,	56690,	61110,
+                                             seq(from=12760, to=(12760+4480*11), by=4480), 
+                                             seq(from=12880, to=(12880+4540*11), by=4540), 
+                                             seq(from=13590, to=(13590+4720*11), by=4720)),
+                             Year = c(rep(2016,12),rep(2018,12), rep(2017,12), rep(2019,12),rep(2020,12),rep(2021,12),rep(2022,12)))
+
+FSQ <- merge(FSQ, reference_data,
+                          by.x = c("FSQ.Year", "FSQ.FSQ_08"),
+                          by.y = c("Year", "familysize"), 
+                          all.x = TRUE)
+FSQ$income.adj<-FSQ$totalincome / FSQ$povertyline
+summary(FSQ$income.adj)
+FSQ$FSQ.EID <- paste0("sub-", FSQ$FSQ.EID)
+basic_demo2 <- basic_demo2 %>% left_join(select(FSQ, c("FSQ.EID", "income.adj")), join_by(subID==FSQ.EID))
+
+```
+
+
+### Merge CBCL, p-factor
+
+P factors provided by HBN-EEG ([Seyed Yahya Shirazi et al., 2024](https://www.biorxiv.org/content/10.1101/2024.10.03.615261v2)) were used.
+```{r CBCL}
+pfactortab <- data.frame(subID=rep(NA, 1), GENERAL=rep(NA, 1), ADHD=rep(NA, 1), Internal=rep(NA, 1), External=rep(NA, 1))
+for (i in 1:9){
+  EEGtab <- read.table(paste0(demo_path, "/participants_EEGr", i, ".tsv"), header = T)
+  pfactortabadd <- EEGtab %>% select(participant_id, p_factor, attention, internalizing, externalizing)
+  names(pfactortabadd) <- c("subID", "GENERAL", "ADHD", "Internal", "External")
+  pfactortab <- rbind(pfactortab, pfactortabadd)
+}
+pfactortab <- pfactortab[-1,]
+basic_demo2 <- basic_demo2 %>% left_join(pfactortab, by="subID")
+
+CBCL <- read.csv(paste0(demo_path, "/CBCL.csv"))
+CBCL_Pre <- read.csv(paste0(demo_path, "/CBCL_Pre.csv"))
+CBCL$CBCL.EID <- paste0("sub-", CBCL$CBCL.EID)
+CBCL_Pre$CBCL_Pre.EID <- paste0("sub-", CBCL_Pre$CBCL_Pre.EID)
+CBCL <- CBCL %>% select(CBCL.CBCL_Total, CBCL.CBCL_Total_T, CBCL.EID)
+CBCL_Pre <- CBCL_Pre %>% select(CBCL_Pre.CBCLPre_Total, CBCL_Pre.CBCLPre_Total_T, CBCL_Pre.EID)
+basic_demo2 <- basic_demo2 %>% left_join(CBCL, join_by(subID==CBCL.EID))
+basic_demo2 <- basic_demo2 %>% left_join(CBCL_Pre, join_by(subID==CBCL_Pre.EID))
+
+basic_demo2 <- basic_demo2 %>% mutate(
+  CBCL_total = case_when(
+    is.na(CBCL.CBCL_Total) ~ CBCL_Pre.CBCLPre_Total,
+    .default = CBCL.CBCL_Total
+  ),
+  CBCL_total_T = case_when(
+    is.na(CBCL.CBCL_Total_T) ~ CBCL_Pre.CBCLPre_Total_T,
+    .default = CBCL.CBCL_Total_T
+  )
+)
+
+write.csv(basic_demo2, paste0(result_path, "/basic_demo_merge_screen_MRIQC.csv"), row.names = F)
+```
+
+### Plot age distribution
+
+```{r}
+basic_demo2$if_TD <- factor(basic_demo2$if_TD, levels = c(T, F), labels=c("TD", "ADHD"))
+basic_demo2 <- basic_demo2 %>% filter(age < 18)
+ggplot(data = basic_demo2, aes(age, y = ..count..)) +
+  geom_histogram(binwidth = 1, color = "black", fill="#B2DF8A", position = "stack",linewidth=0.5) +
+  facet_wrap(~if_TD, ncol = 1, nrow = 2, scales = "free") +
+  labs(x = "Age (years)", y = NULL) +
+  #scale_x_continuous(limits = c(9, 16), breaks = c(9,10,11,12,13,14,15,16)) +
+  #scale_y_continuous(limits = c(0, 50), breaks = c(0,10, 20,30,40, 50)) +
+  #geom_hline(aes(yintercept = 10), colour = "red", linetype="dashed")+
+  theme_classic()+
+  theme(panel.background = element_rect(fill="transparent"),
+        plot.background = element_rect(fill = "transparent",colour = NA),aspect.ratio = 0.2,
+        plot.title = element_text(color = "black", size = 14, hjust = 0.5),
+        strip.text = element_text(size = 14, color = "black"),
+        strip.background = element_rect(fill = "transparent",colour = NA),
+        axis.title = element_text(color = "black", size = 14),axis.line = element_line(linewidth = 0.4),
+        axis.ticks = element_line(linewidth = 0.4),
+        axis.text = element_text(color = "black", size = 14), 
+        legend.text = element_text(color = "black", size = 12),
+        legend.title = element_text(color = "black", size = 12))
+
+ggsave(paste(FigureFolderHBN, '/Fig1_Age_distribution_count_ABCD_ADHDall.tiff', sep = ''),  width = 20, height = 20, units = "cm")
+ggsave(paste(FigureFolderHBN, '/Fig1_Age_distribution_count_ABCD_ADHDall.svg', sep = ''), width = 20, height = 20, units = "cm")
+
+## Description for demographic information
+HBN_vars <- c("age", "sex","site", "ehq_total", "if_TD")
+HBN_tableone <- CreateTableOne(HBN_vars,strata="if_TD", data = basic_demo2, factorVars=c("sex","site"), test=F)
+HBN_tableone <- as.data.frame(print(HBN_tableone))
+write.csv(HBN_tableone, paste0(FigureFolderHBN, '/MRIdemographic_info.csv'))
+
+
+```
+
+
+

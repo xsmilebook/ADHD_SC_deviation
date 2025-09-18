@@ -1,0 +1,617 @@
+---
+title: "S5_plotNM_eachGroup"
+author:
+  - name: Xiaoyu Xu
+    orcid: 0000-0002-7349-3366
+    email: xuxiaoyu@cibr.ac.cn
+    url: https://scholar.google.com/citations?user=G0jeI1AAAAAJl
+    affiliation: 
+      - name: Chinese Institute for Brain Research, Beijing (CIBR)
+        group: CUIZAIXU Lab
+        url: https://cuilab.cibr.ac.cn/
+date: "2025-09-02"
+format: 
+  html:
+    code-fold: true
+    code-tools: true
+    theme: Materia
+    toc: true
+    toc_depth: 3
+    toc-expand: 1
+    toc_float: true
+    toc-location: left
+    number-sections: true
+    number-depth: 3
+    embed-resources: true
+---
+
+```{r}
+#| label: load-packages-data
+#| include: false
+library(ggplot2)
+library(tidyverse)
+library(mgcv)
+library(readxl)
+library(openxlsx)
+library(parallel)
+library(gamlss)
+library(scales)
+rm(list=ls())
+# set resolution
+Yeoresolution <- 17
+if (Yeoresolution == 7){
+  Yeoresolution.delLM = 6
+}else if (Yeoresolution == 17){
+  Yeoresolution.delLM = 15
+}
+element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
+
+# input directory
+wd <- getwd()
+homepath <- str_split_i(wd, "Normative_model", 1)
+demopath <- paste0(homepath, '/Normative_model/demography')
+interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_EFNYnoCCNP')
+functionFolder <- paste0(homepath, "/Normative_model/functions")
+resultFolder <- paste0(homepath, "/Normative_model/results_EFNYnoCCNP")
+functionFolder.SCDev <- paste0(homepath, "/SC_development/Rcode_SCdevelopment/gamfunction")
+FigureFolder <- paste0(homepath, '/Normative_model/Figures_EFNYnoCCNP/Yeo', Yeoresolution,'/CV75')
+
+# load data
+SCdata <- readRDS(paste0(interfileFolder, '/SCdata_Yeo',Yeoresolution, '_CV75_sumSCinvnode.sum.msmtcsd.merge.rds'))
+SCdata$sex <- as.factor(SCdata$sex)
+SCdata <- SCdata %>% mutate(WB_SCmean = rowMeans(dplyr::select(.,starts_with("SC."))))
+SCdata.TD.trainset <- readRDS(paste0(interfileFolder, "/SCdata.allTD_EFNYnoCCNP.SCYeo", element_num, ".rds"))
+
+SCdata.ADHD <- SCdata %>% filter(ADHD == 1)
+
+mod.TD.sum <- readRDS(paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,".TDtraining.All.rds"))
+
+source(paste0(functionFolder, "/Construct_gamlss_set.R"))
+source(paste0(functionFolder, "/plotmatrix.R"))
+source(paste0(functionFolder.SCDev, '/SCrankcorr.R'))
+
+deviationdf <- readRDS(paste0(interfileFolder, '/SCdata_Yeo', Yeoresolution,'_CV75_deviations_all.rds'))
+deviationdf <- deviationdf %>% filter(visit=="0")
+
+```
+
+
+## Step1 Compute the 1st derivatives for the P50 trajectories
+
+Use finite difference.
+
+```{r}
+
+# define 1st derivative
+comuptederivative <- function(smoothvar, mod.tmp, n_points, n_sites){
+  # estimate first derivatives (finite difference)
+  eps <- 1e-7
+  x0 <- seq(min(SCdata[[smoothvar]]), max(SCdata[[smoothvar]]), length.out = n_points)
+  x1 <- x0 + eps
+  derivative_male <- array(NA, dim = c(n_sites, n_points))
+  derivative_female <- array(NA, dim = c(n_sites, n_points))
+  mean_fdvalue <- mean(SCdata$mean_fd)
+
+  for (j in 1:n_sites){
+    site.tmp <- unique(gam.data2$site)[j]
+    command <- "Qua <- getQuantile(mod.tmp, quantile=0.5, term = 'age', fixed.at = list(sex='F', mean_fd=mean_fdvalue, randomvar=site.tmp), n.points = n_points)"
+    eval(parse(text=command))
+    derivative_female[j, ] <- (Qua(x1) - Qua(x0)) / eps
+    
+    command <- "Qua <- getQuantile(mod.tmp, quantile=0.5, term = 'age', fixed.at = list(sex='M', mean_fd=mean_fdvalue, randomvar=site.tmp), n.points = n_points)"
+    eval(parse(text=command))
+    derivative_male[j, ] <- (Qua(x1) - Qua(x0)) / eps
+  }
+  
+  derivative <- (derivative_female + derivative_male) /2
+  derivative_all <- list(derivative, derivative_female, derivative_male)
+  
+  return(derivative_all)
+}
+
+
+# Conduct
+smoothvar <- "age"
+n_points = 1000
+n_sites <- nlevels(SCdata$site %>% droplevels())
+## TD
+# Environment variable
+gam.data2 <- SCdata.TD.trainset
+gam.data2$randomvar <- as.factor(gam.data2[["site"]])
+gam.data2 <- as.data.frame(gam.data2)
+
+if (! file.exists(paste0(interfileFolder, "/FirstDeirvative_GAMLSS_Yeo", Yeoresolution,".TDtraining.sum.rds"))){
+  DerivativeTD.sum <- mclapply(1:element_num, function(i){
+    mod.tmp <- mod.TD.sum[[i]]$mod.tmp
+    
+    invisible(sumlist <- comuptederivative(smoothvar, mod.tmp, n_points, n_sites))
+    sumlist$derivativemean <- colMeans(sumlist[[1]])
+    return(sumlist)
+  }, mc.cores = 40)
+  
+  saveRDS(DerivativeTD.sum, paste0(interfileFolder, "/FirstDeirvative_GAMLSS_Yeo", Yeoresolution,".TDtraining.sum.rds"))
+}else{
+  DerivativeTD.sum <- readRDS(paste0(interfileFolder, "/FirstDeirvative_GAMLSS_Yeo", Yeoresolution,".TDtraining.sum.rds"))
+}
+
+
+```
+
+
+## Step2 Plot the trajectories
+
+```{r}
+
+## 1) Avergae first derivative matrix
+DerivativeTD.avg <- lapply(DerivativeTD.sum, function(x) mean(x$derivativemean))
+DerivativeTD.avg <- unlist(DerivativeTD.avg)
+
+CentileTD.P50.1 <- lapply(mod.TD.sum, function(x) (x$centiles_strat[[1]][2,1]+x$centiles_strat[[2]][2,1])/2)
+CentileTD.P50.1 <- unlist(CentileTD.P50.1)
+
+Derivative.df <- data.frame(SClabel= paste0("SC.", 1:element_num), DerivativeTD.avg=DerivativeTD.avg / CentileTD.P50.1)
+
+SCrankdf <- SCrankcorr(data.frame(rand=rnorm(element_num, 0, 1)), "rand", Yeoresolution.delLM, T)
+
+SCrankdf$SClabel <- paste0("SC.", 1:element_num)
+
+## 2) The onset age
+Agesequence <- seq(min(SCdata[["age"]]), max(SCdata[["age"]]), length.out = 1000)
+
+# TD
+DerivativeTD.df <- do.call(rbind, lapply(DerivativeTD.sum, function(x) x$derivativemean))
+DerivativeTD.df <- t(DerivativeTD.df)
+DerivativeTD.df <- as.data.frame(DerivativeTD.df)
+names(DerivativeTD.df) <- paste0("SC.", 1:element_num)
+DerivativeTD.df$age <- Agesequence
+
+DerivativeTD.df.l <- DerivativeTD.df %>% pivot_longer(cols=starts_with("SC."), names_to="label_ID",
+                                                      values_to="derivative")
+
+peakchangeTD <- DerivativeTD.df.l %>% group_by(label_ID) %>% 
+  summarise(peakchange = mean(age[round(abs(derivative), 4) == max(round(abs(derivative), 4))]),
+            onsetage = if (sum(derivative > 0) > 0){min(age[derivative > 0])}else{NA})
+peakchangeTD$SCID <- as.numeric(gsub("SC.", "", peakchangeTD$label_ID))
+peakchangeTD <- peakchangeTD[order(peakchangeTD$SCID), ]
+
+# 1st derivative
+lmthr <- max(abs(Derivative.df$DerivativeTD.avg))+1e-5 # 0.03672811
+axeslabels=c("VS.P", "SM.A", "VS.C", "SM.B", "DA.A", "DA.B", "FP.C", "DM.C", "VA.A", "TP", "FP.A", "VA.B", "DM.A", "FP.B", "DM.B") 
+axeslabelsGap=T
+PaletteSet <- list(Name="RdBu", drirection=-1, lmmin = -lmthr, lmmax = lmthr, anglex=45, angley=45,
+                   hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.3)
+AvgDerivativeTD <- plotmatrix(dataname="Derivative.df", variable="DerivativeTD.avg", ds.resolution=Yeoresolution.delLM, Pvar=NA, NAcol="white", lmthr=NA, axeslabels=axeslabels, axeslabelsGap=F, linerange_frame=NA, PaletteSet=PaletteSet, Pvar.noFDR=NA)
+AvgDerivativeTD
+
+ggsave(paste0(FigureFolder, "/Normative_Trajectory/AvgDerivative_TD_Mat.tiff"), AvgDerivativeTD, height = 14, width = 16, units = "cm")
+
+# Increase onset
+lmmax <- max(peakchangeTD$onsetage, na.rm=T)
+lmmin <- min(peakchangeTD$onsetage, na.rm=T)
+PaletteSet <- list(Name="BuPu", drirection=1, lmmin = lmmin, lmmax = 15.5, anglex=45, angley=45,
+                   hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.5)
+axeslabels=c("VS.P", "SM.A", "VS.C", "SM.B", "DA.A", "DA.B", "FP.C", "DM.C", "VA.A", "TP", "FP.A", "VA.B", "DM.A", "FP.B", "DM.B") 
+
+Matonset.TD <- plotmatrix(dataname="peakchangeTD", variable="onsetage", ds.resolution=Yeoresolution.delLM, Pvar=NA, NAcol="#4D004B", lmthr=NA, axeslabels=axeslabels, axeslabelsGap=T, linerange_frame=NA, PaletteSet=PaletteSet)
+Matonset.TD
+
+ggsave(paste0(FigureFolder, "/Normative_Trajectory/Onset_TD_Mat.tiff"), Matonset.TD, height = 16, width = 18, units = "cm")
+
+## 3) Developmental trajectories
+# TD
+CentileP50.TD <- do.call(rbind, lapply(mod.TD.sum, function(x) (x$centiles_strat[[1]][2,]+x$centiles_strat[[2]][2,])/2))
+
+CentileP50.TD <- CentileP50.TD / CentileTD.P50.1
+
+CentileP50.TD <- t(CentileP50.TD)
+CentileP50.TD <- as.data.frame(CentileP50.TD)
+names(CentileP50.TD) <- paste0("SC.", 1:element_num)
+CentileP50.TD$age <- seq(min(SCdata.TD.trainset$age), max(SCdata.TD.trainset$age), length.out=1000)
+
+CentileP50.TD.l <- CentileP50.TD %>% pivot_longer(cols=starts_with("SC."), names_to="label_ID",
+                                                      values_to="fit")
+CentileP50.TD.l <- CentileP50.TD.l %>% left_join(Derivative.df, join_by("label_ID"=="SClabel"))
+
+CentileP50.TD.l <- CentileP50.TD.l %>% left_join(SCrankdf, join_by("label_ID"=="SClabel"))
+
+# TD trajectories
+CentileP50.TD.l$label_ID <- factor(CentileP50.TD.l$label_ID, levels=SCrankdf$SClabel[order(SCrankdf$SCrank)])
+
+TDline <- ggplot(data=CentileP50.TD.l)+
+  geom_line(aes(x=age, y=fit, group=label_ID, color=DerivativeTD.avg), linewidth=0.8, alpha=0.8)+
+  scale_color_distiller(type="seq", palette = "RdBu", direction = -1, limits=c(-max(Derivative.df$DerivativeTD.avg), max(Derivative.df$DerivativeTD.avg)))+
+  #scale_y_continuous(limits = c(ymin, ymax))+
+  labs(x="Age (years)", y="SC strength (ratio)", color="Avg derivative")+
+  theme_classic()+
+  theme(axis.text=element_text(size=20, color="black"), 
+        axis.title =element_text(size=20, color="black"),aspect.ratio = 0.9,
+        plot.background=element_rect(fill="white"),
+        panel.background=element_rect(fill="white"),
+        plot.title = element_text(size=20, hjust = 0.5),
+        legend.text = element_text(size=20, color="black"), legend.title = element_text(size=20, color="black"))
+
+ggsave(paste0(FigureFolder, "/Normative_Trajectory/P50fitlines_TD.tiff"), TDline, width=17, height =15, units = "cm")
+
+
+```
+
+
+
+## Step3 Plot the deviation
+
+
+```{r}
+deviationSCmat.list <- list()
+# ADHD
+deviationdf.ADHD <- deviationdf %>% filter(diagnosis=="ADHD")
+
+deviationSCmat <- deviationdf.ADHD %>% dplyr::select(ends_with("_deviationZ") & starts_with("SC."))
+deviationSCmat.mean <- colMeans(deviationSCmat)
+deviationSCmat.df <- data.frame(SClabel = names(deviationSCmat), deviationMean = deviationSCmat.mean)
+deviationSCmat.list[["ADHD"]] <- deviationSCmat.df
+
+lmthr <- max(abs(deviationSCmat.df$deviationMean))+1e-5 # 0.3794542
+axeslabels=c("VS.P", "SM.A", "VS.C", "SM.B", "DA.A", "DA.B", "FP.C", "DM.C", "VA.A", "TP", "FP.A", "VA.B", "DM.A", "FP.B", "DM.B") 
+axeslabelsGap=T
+PaletteSet <- list(Name="RdBu", drirection=-1, lmmin = -lmthr, lmmax = lmthr, anglex=45, angley=45,hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.3)
+
+deviationADHD <- plotmatrix(dataname="deviationSCmat.df", variable="deviationMean", ds.resolution=Yeoresolution.delLM, Pvar=NA, NAcol="white", lmthr=NA, axeslabels=axeslabels, axeslabelsGap=F, linerange_frame=NA, PaletteSet=PaletteSet, Pvar.noFDR=NA)
+deviationADHD
+
+ggsave(paste0(FigureFolder, "/Normative_Trajectory/MeanDeviation_ADHD_MatAll.tiff"), deviationADHD, height = 14, width = 16, units = "cm")
+
+## Correlation to S-A connectional axis
+SCrankcorr(deviationSCmat.df, "deviationMean", Yeoresolution.delLM)
+#    ds.resolution  Interest.var r.spearman p.spearman
+# 1            15 deviationMean  0.1946113 0.03317532
+
+# scatter plot
+df <- SCrankcorr(deviationSCmat.df, "deviationMean", Yeoresolution.delLM, T)
+
+scatter <- ggplot(data=df)+
+    geom_point(aes(x=SCrank, y=deviationMean), color="#B2182B", size=1.8)+
+    geom_smooth(aes(x=SCrank, y=deviationMean), method ="lm", color="black", linewidth=1.2)+
+    #scale_color_distiller(type="seq", palette = "RdBu", limits=c(-lmthr, lmthr), direction = -1)+
+    labs(x="S-A connectional axis rank", y="Average SC deviation")+
+    #scale_y_continuous(breaks = c(-0.015, -0.010, -0.005,0, 0.005, 0.010), labels = c(-15,-10, -5, 0, 5, 10))+
+    #scale_y_continuous(breaks = c(-0.003,0, 0.003, 0.006), labels = c(-3, 0, 3, 6))+
+    scale_x_continuous(breaks = c(0,20,40,60,80,100,120))+
+    theme_classic()+
+    theme(axis.text=element_text(size=20.3, color="black"), 
+        axis.title =element_text(size=20.3, color="black"),aspect.ratio = 1,
+        plot.background=element_rect(fill="white"),
+        panel.background=element_rect(fill="white"),
+        plot.title = element_text(size=16, hjust = 0.5),
+        legend.position = "none")
+ggsave(paste0(FigureFolder, '/Normative_Trajectory/AvgDeivationADHD_SCrankcorr.tiff'),scatter, width=15, height =15, units = "cm")
+
+# TD
+deviationdf.TD <- deviationdf %>% filter(diagnosis=="TD")
+
+deviationSCmat <- deviationdf.TD %>% dplyr::select(ends_with("_deviationZ") & starts_with("SC."))
+deviationSCmat.mean <- colMeans(deviationSCmat)
+deviationSCmat.df <- data.frame(SClabel = names(deviationSCmat), deviationMean = deviationSCmat.mean)
+deviationSCmat.list[["TD"]] <- deviationSCmat.df
+
+axeslabels=c("VS.P", "SM.A", "VS.C", "SM.B", "DA.A", "DA.B", "FP.C", "DM.C", "VA.A", "TP", "FP.A", "VA.B", "DM.A", "FP.B", "DM.B") 
+PaletteSet <- list(Name="RdBu", drirection=-1, lmmin = -lmthr, lmmax = lmthr, anglex=45, angley=45,hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.3)
+
+deviationTD <- plotmatrix(dataname="deviationSCmat.df", variable="deviationMean", ds.resolution=Yeoresolution.delLM, Pvar=NA, NAcol="white", lmthr=NA, axeslabels=axeslabels, axeslabelsGap=F, linerange_frame=NA, PaletteSet=PaletteSet, Pvar.noFDR=NA)
+deviationTD
+
+ggsave(paste0(FigureFolder, "/Normative_Trajectory/MeanDeviation_TD_MatAll.tiff"), deviationTD, height = 14, width = 16, units = "cm")
+
+## Correlation to S-A connectional axis
+deviationSCmat.df <- deviationSCmat.df %>% mutate(
+  deviationMean2 = case_when(
+    deviationMean < mean(deviationMean) - 3*sd(deviationMean) ~ NA,
+    .default = deviationMean
+  )
+)
+SCrankcorr(deviationSCmat.df, "deviationMean2", Yeoresolution.delLM)
+#   ds.resolution  Interest.var r.spearman   p.spearman
+# 1            15 deviationMean2  0.04297557  0.6425946	
+
+# scatter plot
+df <- SCrankcorr(deviationSCmat.df, "deviationMean2", Yeoresolution.delLM, T)
+
+scatter <- ggplot(data=df)+
+    geom_point(aes(x=SCrank, y=deviationMean2, color=deviationMean2), size=5)+
+    geom_smooth(aes(x=SCrank, y=deviationMean2), method ="lm", color="black", linewidth=1.2)+
+    scale_color_distiller(type="seq", palette = "RdBu", limits=c(-lmthr, lmthr), direction = -1)+
+    labs(x="S-A connectional axis rank", y="Average SC deviation")+
+    #scale_y_continuous(breaks = c(-0.015, -0.010, -0.005,0, 0.005, 0.010), labels = c(-15,-10, -5, 0, 5, 10))+
+    #scale_y_continuous(breaks = c(-0.003,0, 0.003, 0.006), labels = c(-3, 0, 3, 6))+
+    scale_x_continuous(breaks = c(0,20,40,60,80,100,120))+
+    theme_classic()+
+    theme(axis.text=element_text(size=20, color="black"), 
+          axis.title =element_text(size=20),aspect.ratio = 0.83,
+          axis.line = element_line(linewidth=0.6),axis.ticks= element_line(linewidth=0.6),
+          plot.title = element_text(size=20, hjust = 0.5, vjust=2),
+          plot.background=element_rect(fill="transparent"),
+          panel.background=element_rect(fill="transparent"),
+          legend.position = "none")
+ggsave(paste0(FigureFolder, '/Normative_Trajectory/AvgDeivationTD_SCrankcorr.tiff'),scatter, width=17, height =15.5, units = "cm")
+
+
+### Interaction effect
+deviationSCmat.list[[1]]$if_TD <- "ADHD"
+deviationSCmat.list[[2]]$if_TD <- "TD"
+
+deviationSCmat.all <- do.call(rbind, deviationSCmat.list)
+SCrankdf <- SCrankcorr(deviationSCmat.df, "deviationMean", Yeoresolution.delLM, T)
+SCrankdf$SClabel <- paste0("SC.", 1:element_num, "_deviationZ")
+SCrankdf$deviationMean <- NULL
+deviationSCmat.all <- deviationSCmat.all %>% left_join(SCrankdf, by="SClabel")
+deviationSCmat.all$if_TD <- factor(deviationSCmat.all$if_TD, levels=c("TD", "ADHD"))
+intmodel <- lm(deviationMean ~ SCrank*if_TD, data = deviationSCmat.all)
+nullmodel <- lm(deviationMean ~ SCrank+if_TD, data = deviationSCmat.all)
+summary(intmodel)
+# Coefficients:
+#                    Estimate Std. Error t value Pr(>|t|)  
+# (Intercept)      -0.0119403  0.0200464  -0.596   0.5520  
+# SCrank            0.0001302  0.0002875   0.453   0.6512  
+# if_TDADHD        -0.0366701  0.0283498  -1.293   0.1971  
+# SCrank:if_TDADHD  0.0007707  0.0004067   1.895   0.0593 .
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.1091 on 236 degrees of freedom
+# Multiple R-squared:  0.04267,	Adjusted R-squared:  0.0305 
+# F-statistic:  3.506 on 3 and 236 DF,  p-value: 0.01608
+anova(nullmodel, intmodel) # F = 3.5916, P=0.0593
+
+scatter <- ggplot(data=deviationSCmat.all)+
+    geom_point(aes(x=SCrank, y=deviationMean, color=if_TD), size=3)+
+    geom_smooth(aes(x=SCrank, y=deviationMean, fill=if_TD), method ="lm", color="black", alpha=0.3, linewidth=1.2)+
+    scale_color_manual(values = c("gray", "#810F7C"))+
+    scale_fill_manual(values = c("gray", "#810F7C"))+
+    labs(x="S-A connectional axis rank", y="Average SC deviation", color=NULL, fill=NULL)+
+    #scale_y_continuous(breaks = c(-0.015, -0.010, -0.005,0, 0.005, 0.010), labels = c(-15,-10, -5, 0, 5, 10))+
+    #scale_y_continuous(breaks = c(-0.003,0, 0.003, 0.006), labels = c(-3, 0, 3, 6))+
+    scale_x_continuous(breaks = c(0,20,40,60,80,100,120))+
+    theme_classic()+
+    theme(axis.text=element_text(size=20, color="black"), 
+          axis.title =element_text(size=20),aspect.ratio = 0.83,
+          axis.line = element_line(linewidth=0.6),axis.ticks= element_line(linewidth=0.6),
+          plot.title = element_text(size=20, hjust = 0.5, vjust=2),
+          plot.background=element_rect(fill="transparent"),
+          panel.background=element_rect(fill="transparent"),
+          legend.text = element_text(size=20, color="black"))
+ggsave(paste0(FigureFolder, '/Normative_Trajectory/AvgDeivation_SCrankcorr_Interaction.tiff'),scatter, width=19, height =15.5, units = "cm")
+
+
+## Select a random edge
+
+for (i in c(3,64,65,84,96,98,109,110,117,119)){
+  SClabel = paste0("SC.", i)
+  centile.tmp <- mod.TD.sum[[i]]$centiles_strat
+  centile.tmp <- (centile.tmp[[1]] + centile.tmp[[2]]) / 2
+  centile.tmp <- t(centile.tmp)
+  centile.tmp <- as.data.frame(centile.tmp)
+  names(centile.tmp) <- c("P2.5", "P50", "P97.5")
+  
+  centile.tmp$age <- CentileP50.TD$age
+  centile.tmp <- centile.tmp %>% pivot_longer(starts_with("P"), names_to="Percentile", values_to = "fit")
+  centile.tmp$Percentile <- factor(centile.tmp$Percentile, levels=c("P97.5", "P50", "P2.5"))
+  
+  pointdf.ADHD <- deviationdf.ADHD[,c("age", paste0(SClabel, "_standard"), "ID")]
+  pointdf.TDtest <- deviationdf[deviationdf$diagnosis=="TD",c("age", paste0(SClabel, "_standard"))]
+  
+  TDtest.standard <- pointdf.TDtest[[paste0(SClabel, "_standard")]]
+  ADHD.standard <- pointdf.ADHD[[paste0(SClabel, "_standard")]]
+  
+  Figtmp <- ggplot()+
+    geom_hex(data=pointdf.TDtest, aes(x=age, y=TDtest.standard), bins=20)+
+    scale_fill_gradientn(colors = c("#F0F0F0", "#D9D9D9", "#BDBDBD", "#969696")) +
+    #geom_line(data=pointdf.ADHD, aes(x=age, y=ADHD.standard, group=ID), color="#FDDBC7")+
+    geom_point(data=pointdf.ADHD, aes(x=age, y=ADHD.standard), color="#B2182B")+
+    geom_line(data=centile.tmp, aes(x=age, y=fit, group=Percentile, linetype=Percentile), color="black", linewidth=1)+
+    scale_linetype_manual(values=c("dashed", "solid", "dashed"))+
+    scale_y_continuous(breaks = c(0,1,2,3,4))+
+    labs(x="Age (years)", y="SC strength")+
+    theme_classic()+
+    theme(axis.text=element_text(size=20, color="black"), 
+          axis.title =element_text(size=20, color="black"),aspect.ratio = 1.13,
+          plot.background=element_rect(fill="white"),
+          panel.background=element_rect(fill="white"),
+          plot.title = element_text(size=20, hjust = 0.5),
+          legend.text = element_text(size=20, color="black"), legend.title = element_text(size=20, color="black"))
+  
+  ggsave(paste0(FigureFolder, "/Normative_Trajectory/NormCurve_", SClabel,"_ADHDDeviation.tiff"), Figtmp, width=17, height =16, units = "cm")
+  
+}
+
+
+```
+
+## Step4 Plot the deviation in different age
+
+```{r}
+
+## childhood
+###############
+deviationdf.child <- deviationdf %>% filter(age <= 10)
+# ADHD
+deviationdf.ADHD <- deviationdf.child %>% filter(diagnosis=="ADHD")
+
+deviationSCmat <- deviationdf.ADHD %>% dplyr::select(ends_with("_deviationZ") & starts_with("SC."))
+deviationSCmat.mean <- colMeans(deviationSCmat)
+deviationSCmat.df <- data.frame(SClabel = names(deviationSCmat), deviationMean = deviationSCmat.mean)
+
+
+lmthr <- max(abs(deviationSCmat.df$deviationMean))+1e-5 # 0.03672811
+axeslabels=c("VS.P", "SM.A", "VS.C", "SM.B", "DA.A", "DA.B", "FP.C", "DM.C", "VA.A", "TP", "FP.A", "VA.B", "DM.A", "FP.B", "DM.B") 
+axeslabelsGap=T
+PaletteSet <- list(Name="RdBu", drirection=-1, lmmin = -lmthr, lmmax = lmthr, anglex=45, angley=45,hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.3)
+
+deviationADHD <- plotmatrix(dataname="deviationSCmat.df", variable="deviationMean", ds.resolution=Yeoresolution.delLM, Pvar=NA, NAcol="white", lmthr=NA, axeslabels=axeslabels, axeslabelsGap=F, linerange_frame=NA, PaletteSet=PaletteSet, Pvar.noFDR=NA)
+deviationADHD
+
+ggsave(paste0(FigureFolder, "/Normative_Trajectory/MeanDeviation_ADHD_MatAll_child.tiff"), deviationADHD, height = 14, width = 16, units = "cm")
+
+## Correlation to S-A connectional axis
+SCrankcorr(deviationSCmat.df, "deviationMean", Yeoresolution.delLM)
+#    ds.resolution  Interest.var r.spearman p.spearman
+# 1            15 deviationMean  0.2964434 0.001010422
+
+# scatter plot
+df <- SCrankcorr(deviationSCmat.df, "deviationMean", Yeoresolution.delLM, T)
+
+scatter <- ggplot(data=df)+
+    geom_point(aes(x=SCrank, y=deviationMean, color=deviationMean), size=5)+
+    geom_smooth(aes(x=SCrank, y=deviationMean), method ="lm", color="black", linewidth=1.2)+
+    scale_color_distiller(type="seq", palette = "RdBu", limits=c(-lmthr, lmthr), direction = -1)+
+    labs(x="S-A connectional axis rank", y="Average SC deviation")+
+    #scale_y_continuous(breaks = c(-0.015, -0.010, -0.005,0, 0.005, 0.010), labels = c(-15,-10, -5, 0, 5, 10))+
+    #scale_y_continuous(breaks = c(-0.003,0, 0.003, 0.006), labels = c(-3, 0, 3, 6))+
+    scale_x_continuous(breaks = c(0,20,40,60,80,100,120))+
+    theme_classic()+
+    theme(axis.text=element_text(size=20, color="black"), 
+          axis.title =element_text(size=20),aspect.ratio = 0.83,
+          axis.line = element_line(linewidth=0.5),axis.ticks= element_line(linewidth=0.5),
+          plot.title = element_text(size=20, hjust = 0.5, vjust=2),
+          plot.background=element_rect(fill="transparent"),
+          panel.background=element_rect(fill="transparent"),
+          legend.position = "none")
+ggsave(paste0(FigureFolder, '/Normative_Trajectory/AvgDeivationADHD_SCrankcorr_child.tiff'),scatter, width=17, height =15.5, units = "cm")
+
+# TD
+deviationdf.TD <- deviationdf.child %>% filter(diagnosis=="TD")
+
+deviationSCmat <- deviationdf.TD %>% dplyr::select(ends_with("_deviationZ") & starts_with("SC."))
+deviationSCmat.mean <- colMeans(deviationSCmat)
+deviationSCmat.df <- data.frame(SClabel = names(deviationSCmat), deviationMean = deviationSCmat.mean)
+
+axeslabels=c("VS.P", "SM.A", "VS.C", "SM.B", "DA.A", "DA.B", "FP.C", "DM.C", "VA.A", "TP", "FP.A", "VA.B", "DM.A", "FP.B", "DM.B") 
+PaletteSet <- list(Name="RdBu", drirection=-1, lmmin = -lmthr, lmmax = lmthr, anglex=45, angley=45,hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.3)
+
+deviationTD <- plotmatrix(dataname="deviationSCmat.df", variable="deviationMean", ds.resolution=Yeoresolution.delLM, Pvar=NA, NAcol="white", lmthr=NA, axeslabels=axeslabels, axeslabelsGap=F, linerange_frame=NA, PaletteSet=PaletteSet, Pvar.noFDR=NA)
+deviationTD
+
+ggsave(paste0(FigureFolder, "/Normative_Trajectory/MeanDeviation_TD_MatAll_child.tiff"), deviationTD, height = 14, width = 16, units = "cm")
+
+## Correlation to S-A connectional axis
+SCrankcorr(deviationSCmat.df, "deviationMean", Yeoresolution.delLM)
+#   ds.resolution  Interest.var r.spearman   p.spearman
+# 1            15 deviationMean  0.19649 0.03148215		
+
+# scatter plot
+df <- SCrankcorr(deviationSCmat.df, "deviationMean", Yeoresolution.delLM, T)
+
+scatter <- ggplot(data=df)+
+    geom_point(aes(x=SCrank, y=deviationMean, color=deviationMean), size=5)+
+    geom_smooth(aes(x=SCrank, y=deviationMean), method ="lm", color="black", linewidth=1.2)+
+    scale_color_distiller(type="seq", palette = "RdBu", limits=c(-lmthr, lmthr), direction = -1)+
+    labs(x="S-A connectional axis rank", y="Average SC deviation")+
+    #scale_y_continuous(breaks = c(-0.015, -0.010, -0.005,0, 0.005, 0.010), labels = c(-15,-10, -5, 0, 5, 10))+
+    #scale_y_continuous(breaks = c(-0.003,0, 0.003, 0.006), labels = c(-3, 0, 3, 6))+
+    scale_x_continuous(breaks = c(0,20,40,60,80,100,120))+
+    theme_classic()+
+    theme(axis.text=element_text(size=20, color="black"), 
+          axis.title =element_text(size=20),aspect.ratio = 0.83,
+          axis.line = element_line(linewidth=0.6),axis.ticks= element_line(linewidth=0.6),
+          plot.title = element_text(size=20, hjust = 0.5, vjust=2),
+          plot.background=element_rect(fill="transparent"),
+          panel.background=element_rect(fill="transparent"),
+          legend.position = "none")
+ggsave(paste0(FigureFolder, '/Normative_Trajectory/AvgDeivationTD_SCrankcorr_child.tiff'),scatter, width=17, height =15.5, units = "cm")
+
+########################
+
+## adolescence
+###############
+deviationdf.adoles <- deviationdf %>% filter(age > 10)
+# ADHD
+deviationdf.ADHD <- deviationdf.adoles %>% filter(diagnosis=="ADHD")
+
+deviationSCmat <- deviationdf.ADHD %>% dplyr::select(ends_with("_deviationZ") & starts_with("SC."))
+deviationSCmat.mean <- colMeans(deviationSCmat)
+deviationSCmat.df <- data.frame(SClabel = names(deviationSCmat), deviationMean = deviationSCmat.mean)
+
+
+lmthr <- max(abs(deviationSCmat.df$deviationMean))+1e-5 # 0.03672811
+axeslabels=c("VS.P", "SM.A", "VS.C", "SM.B", "DA.A", "DA.B", "FP.C", "DM.C", "VA.A", "TP", "FP.A", "VA.B", "DM.A", "FP.B", "DM.B") 
+axeslabelsGap=T
+PaletteSet <- list(Name="RdBu", drirection=-1, lmmin = -lmthr, lmmax = lmthr, anglex=45, angley=45,hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.3)
+
+deviationADHD <- plotmatrix(dataname="deviationSCmat.df", variable="deviationMean", ds.resolution=Yeoresolution.delLM, Pvar=NA, NAcol="white", lmthr=NA, axeslabels=axeslabels, axeslabelsGap=F, linerange_frame=NA, PaletteSet=PaletteSet, Pvar.noFDR=NA)
+deviationADHD
+
+ggsave(paste0(FigureFolder, "/Normative_Trajectory/MeanDeviation_ADHD_MatAll_adloes.tiff"), deviationADHD, height = 14, width = 16, units = "cm")
+
+## Correlation to S-A connectional axis
+SCrankcorr(deviationSCmat.df, "deviationMean", Yeoresolution.delLM)
+#    ds.resolution  Interest.var r.spearman p.spearman
+# 1            15 deviationMean  0.0423059	0.6463831
+
+# scatter plot
+df <- SCrankcorr(deviationSCmat.df, "deviationMean", Yeoresolution.delLM, T)
+
+scatter <- ggplot(data=df)+
+    geom_point(aes(x=SCrank, y=deviationMean, color=deviationMean), size=5)+
+    geom_smooth(aes(x=SCrank, y=deviationMean), method ="lm", color="black", linewidth=1.2)+
+    scale_color_distiller(type="seq", palette = "RdBu", limits=c(-lmthr, lmthr), direction = -1)+
+    labs(x="S-A connectional axis rank", y="Average SC deviation")+
+    #scale_y_continuous(breaks = c(-0.015, -0.010, -0.005,0, 0.005, 0.010), labels = c(-15,-10, -5, 0, 5, 10))+
+    #scale_y_continuous(breaks = c(-0.003,0, 0.003, 0.006), labels = c(-3, 0, 3, 6))+
+    scale_x_continuous(breaks = c(0,20,40,60,80,100,120))+
+    theme_classic()+
+    theme(axis.text=element_text(size=20, color="black"), 
+          axis.title =element_text(size=20),aspect.ratio = 0.83,
+          axis.line = element_line(linewidth=0.5),axis.ticks= element_line(linewidth=0.5),
+          plot.title = element_text(size=20, hjust = 0.5, vjust=2),
+          plot.background=element_rect(fill="transparent"),
+          panel.background=element_rect(fill="transparent"),
+          legend.position = "none")
+ggsave(paste0(FigureFolder, '/Normative_Trajectory/AvgDeivationADHD_SCrankcorr_adoles.tiff'),scatter, width=17, height =15.5, units = "cm")
+
+# TD
+deviationdf.TD <- deviationdf.adoles %>% filter(diagnosis=="TD")
+
+deviationSCmat <- deviationdf.TD %>% dplyr::select(ends_with("_deviationZ") & starts_with("SC."))
+deviationSCmat.mean <- colMeans(deviationSCmat)
+deviationSCmat.df <- data.frame(SClabel = names(deviationSCmat), deviationMean = deviationSCmat.mean)
+
+axeslabels=c("VS.P", "SM.A", "VS.C", "SM.B", "DA.A", "DA.B", "FP.C", "DM.C", "VA.A", "TP", "FP.A", "VA.B", "DM.A", "FP.B", "DM.B") 
+axeslabelsGap=T
+PaletteSet <- list(Name="RdBu", drirection=-1, lmmin = -lmthr, lmmax = lmthr, anglex=45, angley=45,hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.3)
+
+deviationTD <- plotmatrix(dataname="deviationSCmat.df", variable="deviationMean", ds.resolution=Yeoresolution.delLM, Pvar=NA, NAcol="white", lmthr=NA, axeslabels=axeslabels, axeslabelsGap=F, linerange_frame=NA, PaletteSet=PaletteSet, Pvar.noFDR=NA)
+deviationTD
+
+ggsave(paste0(FigureFolder, "/Normative_Trajectory/MeanDeviation_TD_MatAll_adoles.tiff"), deviationTD, height = 14, width = 16, units = "cm")
+
+## Correlation to S-A connectional axis
+SCrankcorr(deviationSCmat.df, "deviationMean", Yeoresolution.delLM)
+#   ds.resolution  Interest.var r.spearman   p.spearman
+# 1            15 deviationMean  -0.1353108	0.140609			
+
+# scatter plot
+df <- SCrankcorr(deviationSCmat.df, "deviationMean", Yeoresolution.delLM, T)
+
+scatter <- ggplot(data=df)+
+    geom_point(aes(x=SCrank, y=deviationMean, color=deviationMean), size=5)+
+    geom_smooth(aes(x=SCrank, y=deviationMean), method ="lm", color="black", linewidth=1.2)+
+    scale_color_distiller(type="seq", palette = "RdBu", limits=c(-lmthr, lmthr), direction = -1)+
+    labs(x="S-A connectional axis rank", y="Average SC deviation")+
+    #scale_y_continuous(breaks = c(-0.015, -0.010, -0.005,0, 0.005, 0.010), labels = c(-15,-10, -5, 0, 5, 10))+
+    #scale_y_continuous(breaks = c(-0.003,0, 0.003, 0.006), labels = c(-3, 0, 3, 6))+
+    scale_x_continuous(breaks = c(0,20,40,60,80,100,120))+
+    theme_classic()+
+    theme(axis.text=element_text(size=20, color="black"), 
+          axis.title =element_text(size=20),aspect.ratio = 0.83,
+          axis.line = element_line(linewidth=0.6),axis.ticks= element_line(linewidth=0.6),
+          plot.title = element_text(size=20, hjust = 0.5, vjust=2),
+          plot.background=element_rect(fill="transparent"),
+          panel.background=element_rect(fill="transparent"),
+          legend.position = "none")
+ggsave(paste0(FigureFolder, '/Normative_Trajectory/AvgDeivationTD_SCrankcorr_adoles.tiff'),scatter, width=17, height =15.5, units = "cm")
+
+
+
+```
+
+
+
+

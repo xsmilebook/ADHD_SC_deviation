@@ -1,0 +1,479 @@
+---
+title: "S4_compareSCdeviation_ADHDall_VS_TD"
+author:
+  - name: Xiaoyu Xu
+    orcid: 0000-0002-7349-3366
+    email: xuxiaoyu@cibr.ac.cn
+    url: https://scholar.google.com/citations?user=G0jeI1AAAAAJl
+    affiliation: 
+      - name: Chinese Institute for Brain Research, Beijing (CIBR)
+        group: CUIZAIXU Lab
+        url: https://cuilab.cibr.ac.cn/
+date: "2025-07-17"
+format: 
+  html:
+    code-fold: true
+    code-tools: true
+    theme: Materia
+    toc: true
+    toc_depth: 3
+    toc-expand: 1
+    toc_float: true
+    toc-location: left
+    number-sections: true
+    number-depth: 3
+    embed-resources: true
+---
+
+```{r}
+#| label: load-packages-data
+#| include: false
+rm(list=ls())
+library(ggplot2)
+library(corrplot)
+library(RColorBrewer)
+library(tidyverse)
+library(mgcv)
+library(openxlsx)
+library(parallel)
+library(scales)
+library(psych)
+library(reshape)
+library(patchwork)
+library(MatchIt)
+library(tableone)
+
+# set resolution
+Yeoresolution <- 17
+if (Yeoresolution == 7){
+  Yeoresolution.delLM = 6
+}else if (Yeoresolution == 17){
+  Yeoresolution.delLM = 15
+}
+element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
+
+# input directory
+wd <- getwd()
+homepath <- str_split_i(wd, "Normative_model", 1)
+demopath <- paste0(homepath, '/Normative_model/demography')
+interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_EFNYnoCCNP')
+interfileFolder_ABCD <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
+functionFolder <- paste0(homepath, "/Normative_model/functions")
+resultFolder <- paste0(homepath, "/Normative_model/results_EFNYnoCCNP")
+resultFolder_ABCD <- paste0(homepath, "/Normative_model/results_ABCD")
+functionFolder.SCDev <- paste0(homepath, "/SC_development/Rcode_SCdevelopment/gamfunction")
+FigureFolder <- paste0(homepath, '/Normative_model/Figures_EFNYnoCCNP/Yeo', Yeoresolution,'/CV75')
+
+source(paste0(functionFolder, "/plotmatrix.R"))
+source(paste0(functionFolder, "/index2network.R"))
+source(paste0(functionFolder.SCDev, "/SCrankcorr.R"))
+source(paste0(functionFolder, "/gam_varyingfactor.R"))
+source(paste0(functionFolder.SCDev, "/gam_factor_interaction_disease.R"))
+# load data
+SCdata.sum75.merge.ADHDTD <- readRDS(paste0(interfileFolder, '/SCdata_Yeo',Yeoresolution, '_CV75_deviations_all.rds'))
+SCdata.sum75.merge.ADHDTD$sex <- as.factor(SCdata.sum75.merge.ADHDTD$sex)
+SCdata.sum75.merge.ADHDTD$diagnosis <- factor(SCdata.sum75.merge.ADHDTD$diagnosis, levels = c("TD", "ADHD"))
+
+table(SCdata.sum75.merge.ADHDTD$diagnosis, SCdata.sum75.merge.ADHDTD$site)
+
+ABCDresult_child <- readRDS(paste0(interfileFolder_ABCD, "/GroupcompareDeviation_TD-ADHDall_SC_Yeo", element_num, "_child_controlAgeSex.rds"))
+
+
+```
+
+## Step1 Describe SC difference between ADHD and TD change with age.
+
+1.  Interaction model will be fitted, and then the diagnosis effects will computed at different age.
+2.  Posterior distribution of the differences and the corresponding p values will be computed.
+3.  FDR correction will be applied and the differences bar plots will be drawn.
+
+```{r}
+#| label: step1
+
+dataname <- "SCdata.sum75.merge.ADHDTD"
+smooth_var <- "age"
+int_var <- "diagnosis"
+covariates <- "sex+FD"
+knots <- 3
+increments <- draws <- 1000
+
+# Deivation-Z scores were compared for each connection.
+if (! file.exists(paste0(interfileFolder, "/SCDeviationZ_TD_ADHDall_byage_CV75SC_Yeo", element_num,"_controlsex_all10fold.rds"))){
+  set.seed(925)
+  diffresultsum <- list()
+  n = 0
+  for (x in 1:element_num){
+    n = n +1
+    SClabel<-paste0("SC.", x, "_deviationZ")
+    region<-SClabel
+    diffresult<-gam.varyingcoefficients(region, zscale = F, dataname, smooth_var, int_var, covariates, knots, set_fx = T, increments, draws, return_posterior_coefficients = T)
+    diffresult.metric <- diffresult %>% group_by(age) %>%
+      summarise(diff.median = median(slope), se = sd(slope), up975 = quantile(slope, 0.975), lw975 = quantile(slope, 0.025), pvalue = 2*(1- pnorm(abs(mean(slope) / sd(slope)))), Tvalue=(mean(slope) / sd(slope)), SCstrength.TDmedian = median(TD), SCstrength.ADHDmedian = median(`ADHD`))
+    diffresult.metric$parcel <- SClabel
+    
+    diffresultsum[[n]] <- diffresult.metric
+  }
+  
+  saveRDS(diffresultsum, paste0(interfileFolder, "/SCDeviationZ_TD_ADHDall_byage_CV75SC_Yeo", element_num,"_controlsex_all10fold.rds"))
+}else{
+  diffresultsum <- readRDS(paste0(interfileFolder, "/SCDeviationZ_TD_ADHDall_byage_CV75SC_Yeo", element_num,"_controlsex_all10fold.rds"))
+}
+
+# FDR correction
+diffresultsum.df <- do.call(rbind, diffresultsum)
+diffresultsum.df$Tvalue <- diffresultsum.df$Tvalue*-1
+diffresultsum.df <- diffresultsum.df %>% group_by(age) %>%
+  mutate(fdr_pvalue = p.adjust(pvalue, method="fdr")) %>% ungroup()
+summary(diffresultsum.df$fdr_pvalue)
+
+diffresultsum.df$significance_pvalue_fdr <- (diffresultsum.df$fdr_pvalue < 0.05)
+diffresultsum.df$sigT <- diffresultsum.df$Tvalue
+diffresultsum.df$sigT[which(diffresultsum.df$pvalue > 0.05)] <- NA
+diffresultsum.df$sigT_fdr <- diffresultsum.df$Tvalue
+diffresultsum.df$sigT_fdr[which(diffresultsum.df$significance_pvalue_fdr==F)] <- NA
+
+Yeo_10 <- SCrankcorr(data.frame(rand=rnorm(element_num, 0, 1)), "rand", Yeoresolution.delLM, T)
+Yeo_10$SCranknotie <- rank(Yeo_10$SCrank, ties.method = "first")
+Yeo_10$SClabel <- paste0("SC.", 1:element_num, "_deviationZ")
+diffresultsum.df <- diffresultsum.df %>% left_join(Yeo_10, join_by(parcel==SClabel))
+diffresultsum.df <- diffresultsum.df %>% arrange(SCranknotie) %>%
+  mutate(SCrank_label = factor(paste0("label", SCranknotie), levels=paste0("label", sort(Yeo_10$SCranknotie, decreasing = T))))
+summary(diffresultsum.df)
+lmthr <- max(abs(diffresultsum.df$Tvalue), na.rm=T)
+diffresultsum.df.line <- diffresultsum.df %>% group_by(parcel) %>% filter(significance_pvalue_fdr==T) %>%
+  summarise(SCrank_label=unique(SCrank_label),
+            minsigage = min(age), maxsigage = max(age))
+
+# filter the edges which the significant age period no more than 0.5
+diffresultsum.df.line$agegap <- diffresultsum.df.line$maxsigage - diffresultsum.df.line$minsigage
+diffresultsum.df.line <- diffresultsum.df.line %>% filter(agegap >= 0.5)
+
+
+diffresultsum.df.line2 <- diffresultsum.df %>% group_by(parcel) %>%
+  summarise(SCrank_label=unique(SCrank_label),
+            flipage = age[which.min(abs(Tvalue))])
+rankvector <- as.numeric(gsub("label","", diffresultsum.df.line$SCrank_label))
+rankvector2 <- as.numeric(gsub("label","", diffresultsum.df.line2$SCrank_label))
+
+linerange_frame<-data.frame(y=c((rankvector-1), rankvector), xmin=rep(diffresultsum.df.line$minsigage, 2), xmax=rep(diffresultsum.df.line$maxsigage, 2))
+linerange_frame2 <- data.frame(x=c(diffresultsum.df.line$minsigage, diffresultsum.df.line$maxsigage), ymin =rep((rankvector-1), 2), ymax =rep(rankvector, 2))
+linerange_frame3 <- data.frame(x=c(diffresultsum.df.line2$flipage, diffresultsum.df.line2$flipage), ymin =rep((rankvector2-1), 2), ymax =rep(rankvector2, 2))
+
+ggplot(data=diffresultsum.df)+
+  geom_bar(aes(x=age, y=c(rep(1,element_num*1000)), fill = Tvalue, group=SCrank_label,
+               color=Tvalue), alpha=0.5, stat = "identity", position = "stack")+
+  scale_fill_distiller(type="seq", palette = "RdBu", limits=c(-lmthr, lmthr), direction = -1,na.value ="white") +
+  scale_color_distiller(type="seq", palette = "RdBu", limits=c(-lmthr, lmthr), direction = -1,na.value ="white") +
+  geom_linerange(data=linerange_frame, aes(y=y, xmin =xmin, xmax =xmax), color="black", linewidth=0.5)+
+  geom_linerange(data=linerange_frame2, aes(x=x, ymin =ymin, ymax =ymax), color="black", linewidth=0.5)+
+  #scale_x_continuous(breaks = c(8.9, round(median(diffresultsum.df.line2$flipage),1), 15.5))+
+  scale_y_continuous(breaks = c(0, 40, 80, 120), expand = expansion(add=c(1,5)))+
+  scale_x_continuous(expand = expansion(add=c(0.1,0.1)))+
+  #geom_vline(xintercept =round(median(diffresultsum.df.line2$flipage),1), color="red", linetype="dashed")+
+  ylab("S-A connectional axis rank")+xlab("Age (years)")+
+  labs(color=NULL, fill=NULL)+
+  #scale_y_continuous(limits = c(0, element_num))+
+  theme_classic()+
+  theme(axis.text=element_text(size=18, color='black'),
+        axis.title = element_text(size = 18),aspect.ratio = 2.1,
+        plot.title=element_text(size=18, color='black', hjust=0.5),
+        legend.position = "none")
+ggsave(paste0(FigureFolder, '/SCstrength_Age/Deviationcompare/Tvalue_controlsex.tiff'), width=14, height =28, units = "cm")
+
+
+
+##############
+
+diffresultsum.df.ABCDEdges <- diffresultsum.df %>% filter(parcel %in% ABCDresult_child$parcel[ABCDresult_child$p.fdr<0.05])
+diffresultsum.df.ABCDEdges <- diffresultsum.df.ABCDEdges %>% group_by(age) %>%
+  mutate(fdr_pvalue = p.adjust(pvalue, method="fdr")) %>% ungroup()
+summary(diffresultsum.df.ABCDEdges$fdr_pvalue)
+
+diffresultsum.df.ABCDEdges$significance_pvalue_fdr <- (diffresultsum.df.ABCDEdges$fdr_pvalue < 0.05)
+diffresultsum.df.ABCDEdges$sigT <- diffresultsum.df.ABCDEdges$Tvalue
+diffresultsum.df.ABCDEdges$sigT[which(diffresultsum.df.ABCDEdges$pvalue > 0.05)] <- NA
+diffresultsum.df.ABCDEdges$sigT_fdr <- diffresultsum.df.ABCDEdges$Tvalue
+diffresultsum.df.ABCDEdges$sigT_fdr[which(diffresultsum.df.ABCDEdges$significance_pvalue_fdr==F)] <- NA
+
+rand.df <- data.frame(rand = rnorm(element_num, 0, 1))
+Yeo_10 <- SCrankcorr(rand.df, "rand", Yeoresolution.delLM, T)
+Yeo_10$SCranknotie <- rank(Yeo_10$SCrank, ties.method = "first")
+Yeo_10$SClabel <- paste0("SC.", 1:element_num, "_deviationZ")
+
+diffresultsum.df.ABCDEdges <- diffresultsum.df.ABCDEdges %>% arrange(SCranknotie) %>%
+  mutate(SCrank_label = factor(paste0("label", SCranknotie), levels=paste0("label", sort(Yeo_10$SCranknotie, decreasing = T))))
+summary(diffresultsum.df.ABCDEdges)
+lmthr <- max(abs(diffresultsum.df.ABCDEdges$Tvalue), na.rm=T)
+diffresultsum.df.line <- diffresultsum.df.ABCDEdges %>% group_by(parcel) %>% filter(significance_pvalue_fdr==T) %>%
+  summarise(SCrank_label=unique(SCrank_label),
+            minsigage = min(age), maxsigage = max(age))
+diffresultsum.df.line2 <- diffresultsum.df.ABCDEdges %>% group_by(parcel) %>%
+  summarise(SCrank_label=unique(SCrank_label),
+            flipage = age[which.min(abs(Tvalue))])
+
+rankvector <- as.numeric(gsub("label","", diffresultsum.df.line$SCrank_label))
+rankvector2 <- as.numeric(gsub("label","", diffresultsum.df.line2$SCrank_label))
+rankvector2 <- rankvector2[order(rankvector2)]
+
+rankvector3 <- rep(0, length(rankvector))
+for (i in 1:length(rankvector)){
+  rankvector3[i] <- which(rankvector2 == rankvector[i])
+}
+
+linerange_frame<-data.frame(y=c((rankvector3-1), rankvector3), xmin=rep(diffresultsum.df.line$minsigage, 2), xmax=rep(diffresultsum.df.line$maxsigage, 2))
+linerange_frame2 <- data.frame(x=c(diffresultsum.df.line$minsigage, diffresultsum.df.line$maxsigage), ymin =rep((rankvector3-1), 2), ymax =rep(rankvector3, 2))
+linerange_frame3 <- data.frame(x=c(diffresultsum.df.line2$flipage, diffresultsum.df.line2$flipage), ymin =rep((rankvector2-1), 2), ymax =rep(rankvector2, 2))
+
+ggplot(data=diffresultsum.df.ABCDEdges)+
+  geom_bar(aes(x=age, y=c(rep(1,6*1000)), fill = Tvalue, group=SCrank_label,
+               color=Tvalue), alpha=0.5, stat = "identity", position = "stack")+
+  scale_fill_distiller(type="seq", palette = "RdBu", limits=c(-lmthr, lmthr), direction = -1,na.value ="white") +
+  scale_color_distiller(type="seq", palette = "RdBu", limits=c(-lmthr, lmthr), direction = -1,na.value ="white") +
+  geom_linerange(data=linerange_frame, aes(y=y, xmin =xmin, xmax =xmax), color="black", linewidth=0.5)+
+  geom_linerange(data=linerange_frame2, aes(x=x, ymin =ymin, ymax =ymax), color="black", linewidth=0.5)+
+  #scale_x_continuous(breaks = c(8.9, round(median(diffresultsum.df.line2$flipage),1), 15.5))+
+  scale_y_continuous(breaks = seq(from=0.5, to=5.5, by=1), labels=rankvector2, expand = expansion(add=c(0.5,0.5)))+
+  scale_x_continuous(expand = expansion(add=c(0.1,0.1)))+
+  #geom_vline(xintercept =round(median(diffresultsum.df.line2$flipage),1), color="red", linetype="dashed")+
+  ylab("S-A connectional axis rank")+xlab("Age (years)")+
+  labs(color=NULL, fill=NULL)+
+  theme_classic()+
+  theme(axis.text=element_text(size=18, color='black'),
+        axis.title = element_text(size = 18),aspect.ratio = 1,
+        plot.title=element_text(size=18, color='black', hjust=0.5))
+ggsave(paste0(FigureFolder, '/SCstrength_Age/Deviationcompare/Tvalue_controlsex_10fold_ABCDsig.tiff'), width=14, height =14, units = "cm")
+
+print(paste0("The median max age of significant diagnosis effects was ", median(diffresultsum.df.line$maxsigage),"."))
+print(paste0("The median age of diagnosis effects convert is ", median(diffresultsum.df.line2$flipage),"."))
+
+write.csv(diffresultsum.df.line, paste0(resultFolder, "/ADHDTDgroupwise_T_dev_by_age_SC_Yeo", element_num,"_CV75_controlsex_10fold.csv"), row.names = F)
+
+```
+
+
+
+## Step2 Describe SC difference between ADHDall VS TD at different visits
+
+1.  Diagnosis effects will be detected at different visits.
+
+```{r}
+#| label: step2
+
+SCdata.child <- SCdata.sum75.merge.ADHDTD %>% filter(site=="PKU6") %>% filter(age <=10)
+SCdata.adoles <- SCdata.sum75.merge.ADHDTD %>% filter(age >10)
+rbind(table(SCdata.child$diagnosis, SCdata.child$sex), table(SCdata.adoles$diagnosis, SCdata.adoles$sex))
+#       F   M
+# TD   72  83
+# ADHD 56 202
+# TD   68  77
+# ADHD 49 177
+
+## control sex and age
+if (str_detect(wd, "cuizaixu_lab")){
+  for (dataname in c("SCdata.child", "SCdata.adoles")){
+    data.tmp <- get(dataname)
+    
+    Diagnosis.results <- mclapply(1:element_num, function(x){
+      region <- paste0("SC.", x, "_deviationZ")
+      print(region)
+      if (dataname == "SCdata.adoles"){
+        modelformula <- as.formula(sprintf("%1$s ~ diagnosis+s(age, k=3, fx=T)+ sex+FD", region))
+        gam.model <- gam(modelformula, REML=TRUE, data = data.tmp)
+        modelformula.null <- as.formula(sprintf("%1$s ~ s(age, k=3, fx=T)+ sex+FD", region))
+        gam.model.null <- gam(modelformula.null, REML=TRUE, data = data.tmp)
+        
+        anova.result <- anovaPB(gam.model.null, gam.model, n.sim = 10000, ncpus=1)
+        anova.cov.pvalue<-anova.result[2, 5]
+        
+        lm.model <- gam.model
+        mod.result <- summary(gam.model)
+        group_diff <- mod.result$p.table[2,1]
+        tvalue <- mod.result$p.table[2,3]
+      }else{
+        covariates <- "sex+FD"
+        modelformula <- as.formula(sprintf("%s ~ %s + %s",region, "diagnosis", covariates))
+        modelformula.null<-as.formula(sprintf("%s ~ %s",region, covariates))
+        lm.model <- lm(modelformula, data = data.tmp)
+        lm.model.null <- lm(modelformula.null, data = data.tmp)
+        anova.result <- anovaPB(lm.model.null, lm.model, n.sim = 10000, ncpus=1)
+        anova.cov.pvalue<-anova.result$`Pr(>F)`[2]
+        mod.result <- summary(lm.model)
+        tvalue=mod.result$coefficients[2,3]
+        group_diff <- mod.result$coefficients[2,1]
+      }
+      
+      
+      resid_sd <- sigma(lm.model)
+      cohen_d <- group_diff / resid_sd
+      
+      result.df <- data.frame(parcel=region, group="diagnosis", dataname=dataname, tvalue=tvalue,
+                              pvalue=anova.cov.pvalue, cohen_d=cohen_d)
+      return(result.df)
+    }, mc.cores = 50)
+    
+    Diagnosis.results.df <- do.call(rbind, Diagnosis.results)
+    Diagnosis.results.df$p.fdr <- p.adjust(Diagnosis.results.df$pvalue, method="fdr")
+    print(paste(sum(Diagnosis.results.df$p.fdr < 0.05), "edges are significantly different between groups."))
+    saveRDS(Diagnosis.results.df, paste0(interfileFolder, "/GroupcompareDeviation_TD-ADHDall_SC_Yeo", element_num, "_", str_split_i(dataname, "SCdata.", 2), "_controlAgeSex.rds"))
+    
+  }
+}
+
+results.df.child <- readRDS(paste0(interfileFolder, "/GroupcompareDeviation_TD-ADHDall_SC_Yeo", element_num, "_child_controlAgeSex.rds"))
+results.df.adoles <- readRDS(paste0(interfileFolder, "/GroupcompareDeviation_TD-ADHDall_SC_Yeo", element_num, "_adoles_controlAgeSex.rds"))
+
+results.df.child.ABCDROI <- results.df.child %>% filter(parcel %in% ABCDresult_child$parcel[ABCDresult_child$p.fdr<0.05])
+
+for (i in 1:nrow(results.df.child.ABCDROI)){
+  parcel <- results.df.child.ABCDROI$parcel[i]
+  parcel <- gsub("SC.", "", parcel)
+  parcel <- gsub("_deviationZ", "", parcel)
+  
+  networklabel <- index2network(as.numeric(parcel))
+  results.df.child.ABCDROI$label[i] <- paste0(networklabel[1], "-", networklabel[2])
+
+}
+
+
+## report results
+print(paste0(sum(results.df.child$p.fdr < 0.05), " edges have significant diagnosis effects on SC deviation after FDR correction, for child ", sum(results.df.child$pvalue < 0.05), " edges significant before FDR."))
+print(paste0(sum(results.df.adoles$p.fdr < 0.05), " edges have significant diagnosis effects on SC deviation after FDR correction, for adoles. ", sum(results.df.adoles$pvalue < 0.05), " edges significant before FDR."))
+
+
+SArankresult.child <- SCrankcorr(results.df.child, "cohen_d", Yeoresolution.delLM)
+SArankresult.child$agerange <- "child"
+SArankresult.adoles <- SCrankcorr(results.df.adoles, "cohen_d", Yeoresolution.delLM)
+SArankresult.adoles$agerange <- "adoles"
+print(rbind(SArankresult.child, SArankresult.adoles))
+
+#   ds.resolution Interest.var r.spearman p.spearman agerange
+# 1            15      cohen_d  0.2167210 0.01742859    child
+# 2            15      cohen_d  0.1117948 0.22411929   adoles
+
+
+## plot effect size
+results.df.child$agerange <- "child"
+results.df.adoles$agerange <- "adoles"
+
+results.df.all <- rbind(results.df.child, results.df.adoles)
+Yeo_10 <- SCrankcorr(data.frame(rand=rnorm(element_num, 0, 1)), "rand", Yeoresolution.delLM, T)
+Yeo_10$SClabel <- paste0("SC.", 1:element_num, "_deviationZ")
+results.df.all <- results.df.all %>% left_join(Yeo_10, join_by(parcel==SClabel))
+
+lmthr <- max(abs(results.df.all$cohen_d))+0.00001 # 0.198
+axeslabels=c("VS.P", "SM.A", "VS.C", "SM.B", "DA.A", "DA.B", "FP.C", "DM.C", "VA.A", "TP", "FP.A", "VA.B", "DM.A", "FP.B", "DM.B") 
+axeslabelsGap=T
+PaletteSet <- list(Name="RdBu", drirection=-1, lmmin = -lmthr, lmmax = lmthr, anglex=45, angley=45,hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.5)
+for (dataname in c("results.df.child", "results.df.adoles")){
+  FigT <- plotmatrix(dataname, "cohen_d", Yeoresolution.delLM, Pvar="p.fdr",NAcol="white", lmthr=lmthr, axeslabels, axeslabelsGap=T, linerange_frame=NA, PaletteSet=PaletteSet, Pvar.noFDR=NA)
+  print(FigT)
+  ggsave(paste0(FigureFolder, "/SCstrength_Age/Deviationcompare/Matrix12_SCcompare_TD_ADHDall_CohenD_", str_split_i(dataname, "df.", 2),"_controlAgeSex.tiff"), height=18, width=20, units = "cm")
+}
+# scatter plots
+
+results.df.all$agerange <- factor(results.df.all$agerange, levels=rev(c("child", "adoles")))
+ggplot(data=results.df.all)+
+  #geom_point(aes(x=SCrank, y=cohen_d, color=agerange), size=2, alpha=1)+
+  geom_smooth(aes(x=SCrank, y=cohen_d, color=agerange, fill=agerange), alpha=0.5, method = "lm", linewidth=1.2)+
+  scale_fill_manual(values = rev(c("#BDBDBD", "#D9D9D9", "#D1E5F0")))+
+  scale_color_manual(values = rev(c("#252525", "#525252", "#2166AC")))+
+  scale_x_continuous(breaks = c(0, 40, 80, 120))+
+  labs(x="S-A connectional axis rank", y="Diagnosis effect (Cohen's d)")+
+  theme_classic()+
+  theme(axis.text=element_text(size=23, color="black"), 
+          axis.title =element_text(size=23, color="black"),aspect.ratio = 1,
+          axis.line = element_line(linewidth = 0.6),
+          axis.ticks = element_line(linewidth = 0.6),
+          plot.background=element_rect(fill="transparent"),
+          panel.background=element_rect(fill="transparent"),
+          plot.title = element_text(size=15, hjust = 0.5), legend.position = "none")
+
+ggsave(paste0(FigureFolder, "/SCstrength_Age/Deviationcompare/SAaxis_SCcompare_TD_ADHDall_cohend_all_controlAgeSex.tiff"), height=15, width=15, units = "cm")
+ggsave(paste0(FigureFolder, "/SCstrength_Age/Deviationcompare/SAaxis_SCcompare_TD_ADHDall_cohend_all_controlAgeSex.svg"), height=13, width=12, units = "cm")
+
+
+
+```
+
+
+
+## Step3 Compare SC deviation between ADHDall VS TD using the whole sample
+
+```{r}
+
+if (str_detect(wd, "cuizaixu_lab")){
+  set.seed(925)
+  knots = 3
+  int_var <- "diagnosis"
+  Int.results <- mclapply(1:element_num, function(i){
+    dependentvar <- paste0("SC.", i, "_deviationZ")
+    region <- dependentvar
+    dataname <- "SCdata.sum75.merge.ADHDTD"
+    smooth_var <- "age"
+    covariates <- "sex+FD"
+    print(paste("Dependent var is", region, ", independent var is", smooth_var, ", interaction var is", int_var))
+    gam.res <- gam.smooth.predict.interaction(region, dataname, smooth_var, int_var, covariates, knots=3, set_fx = T, stats_only=FALSE, increments=100)
+    gam.res <- as.data.frame(gam.res)
+    gam.res$SClabel <- dependentvar
+    
+    return(gam.res)
+  }, mc.cores=50)
+  
+  Int.results.df <- do.call(rbind, Int.results)
+  saveRDS(Int.results.df, paste0(interfileFolder, "/Deviation_TDtest-ADHDall_SC", element_num,".rds"))
+}else{
+  Int.results.df <- readRDS(paste0(interfileFolder, "/Deviation_TDtest-ADHDall_SC", element_num,".rds"))
+}
+
+Int.results.df_final <- Int.results.df[seq(from=2, to=2*element_num, by = 2),]
+Int.results.df_final$anova.int.pvalue.fdr <- p.adjust(Int.results.df_final$anova.int.pvalue, method = "fdr")
+Int.results.df_final$anova.disease.pvalue.fdr <- p.adjust(Int.results.df_final$anova.disease.pvalue, method = "fdr")
+Int.results.df_final[,3:10] <- lapply(Int.results.df_final[,3:10], as.numeric)
+summary(Int.results.df_final)
+
+print(paste0(sum(Int.results.df_final$anova.int.pvalue.fdr < 0.05), " edges have significant interaction age effects by ADHD diagnosis after FDR correction."))
+# Yeo17: 2
+print(paste0(sum(Int.results.df_final$anova.int.pvalue < 0.05), " edges have significant interaction age effects by ADHD diagnosis before FDR correction."))
+# Yeo17: 19
+print(paste0(sum(Int.results.df_final$anova.disease.pvalue.fdr < 0.05), " edges have significant diagnosis effects on SC strength after FDR correction."))
+# Yeo17: 31
+print(paste0(sum(Int.results.df_final$anova.disease.pvalue < 0.05), " edges have significant diagnosis effects on SC strength before FDR correction."))
+# Yeo17: 45
+
+tabInt <- Int.results.df_final[Int.results.df_final$anova.disease.pvalue.fdr<0.05,]
+print(tabInt)
+
+# plot
+## SC deviation group compare
+lmthr <- max(abs(Int.results.df_final$T.disease))
+axeslabels=c("VS.P", "SM.A", "VS.C", "SM.B", "DA.A", "DA.B", "FP.C", "DM.C", "VA.A", "TP", "FP.A", "VA.B", "DM.A", "FP.B", "DM.B") 
+axeslabelsGap=T
+PaletteSet <- list(Name="RdBu", drirection=-1, lmmin = -lmthr, lmmax = lmthr, anglex=45, angley=45,hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.5)
+
+FigintT <- plotmatrix(dataname="Int.results.df_final", "T.disease", ds.resolution=Yeoresolution.delLM, Pvar="anova.disease.pvalue.fdr", NAcol="white", lmthr=lmthr, axeslabels, axeslabelsGap=T, linerange_frame=NA, Pvar.noFDR=NA)
+
+print(FigintT)
+
+ggsave(paste0(FigureFolder, "/SCstrength_Age/Deviationcompare/Matrix", Yeoresolution.delLM,"_DeviationCompare_TD_ADHDall_T.tiff"),FigintT, height=16, width=18, units = "cm")
+
+## SC deviation trajectories group compare
+lmthr <- max(abs(Int.results.df_final$anova.int.chisq))
+axeslabels=c("VS.P", "SM.A", "VS.C", "SM.B", "DA.A", "DA.B", "FP.C", "DM.C", "VA.A", "TP", "FP.A", "VA.B", "DM.A", "FP.B", "DM.B") 
+axeslabelsGap=T
+PaletteSet <- list(Name="RdBu", drirection=-1, lmmin = -lmthr, lmmax = lmthr, anglex=45, angley=45,hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.5)
+
+Figintchisq <- plotmatrix(dataname="Int.results.df_final", "anova.int.chisq", ds.resolution=Yeoresolution.delLM, Pvar="anova.int.pvalue.fdr", NAcol="white", lmthr=lmthr, axeslabels, axeslabelsGap=T, linerange_frame=NA, Pvar.noFDR=NA)
+
+print(Figintchisq)
+
+ggsave(paste0(FigureFolder, "/SCstrength_Age/Deviationcompare/Matrix", Yeoresolution.delLM,"_TrajectoryCompare_TD_ADHDall_chisq.tiff"),Figintchisq, height=16, width=18, units = "cm")
+
+
+
+```
+
+
+
+
+
+

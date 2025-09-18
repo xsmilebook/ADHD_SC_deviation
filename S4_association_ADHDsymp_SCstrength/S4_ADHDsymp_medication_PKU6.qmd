@@ -1,0 +1,384 @@
+---
+title: "S4_ADHDsymp_medication"
+author:
+  - name: Xiaoyu Xu
+    orcid: 0000-0002-7349-3366
+    email: xuxiaoyu@cibr.ac.cn
+    url: https://scholar.google.com/citations?user=G0jeI1AAAAAJl
+    affiliation: 
+      - name: Chinese Institute for Brain Research, Beijing (CIBR)
+        group: CUIZAIXU Lab
+        url: https://cuilab.cibr.ac.cn/
+date: "2025-09-09"
+format: 
+  html:
+    code-fold: true
+    code-tools: true
+    theme: Materia
+    toc: true
+    toc_depth: 3
+    toc-expand: 1
+    toc_float: true
+    toc-location: left
+    number-sections: true
+    number-depth: 3
+    embed-resources: true
+---
+
+## set path
+
+```{r}
+#| label: load-packages-data
+#| include: false
+
+rm(list=ls())
+library(mgcv);
+library(parallel)
+library(tidyverse)
+library(psych)
+library(ez)
+library(RColorBrewer)
+library(tableone)
+# set resolution
+Yeoresolution <- 17
+if (Yeoresolution == 7){
+  Yeoresolution.delLM = 6
+}else if (Yeoresolution == 17){
+  Yeoresolution.delLM = 15
+}
+element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
+# input directory
+wd <- getwd()
+homepath <- str_split_i(wd, "Normative_model", 1)
+demopath <- paste0(homepath, '/Normative_model/demography')
+interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_EFNYnoCCNP')
+interfileFolder_ABCD <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
+functionFolder <- paste0(homepath, "/Normative_model/functions")
+resultFolder <- paste0(homepath, "/Normative_model/results_EFNYnoCCNP")
+resultFolder_ABCD <- paste0(homepath, "/Normative_model/results_ABCD")
+functionFolder.SCDev <- paste0(homepath, "/SC_development/Rcode_SCdevelopment/gamfunction")
+FigureFolder <- paste0(homepath, '/Normative_model/Figures_EFNYnoCCNP/Yeo', Yeoresolution,'/CV75')
+source(paste0(functionFolder.SCDev, "/gamcog.R"))
+source(paste0(functionFolder.SCDev, "/SCrankcorr.R"))
+source(paste0(functionFolder, "/plotmatrix.R"))
+source(paste0(functionFolder, "/lmsymp.R"))
+source(paste0(functionFolder, "/index2network.R"))
+source(paste0(functionFolder.SCDev, "/gaminteraction.R"))
+# Load data
+SCdata.ADHD <- readRDS(paste0(interfileFolder, '/SCdata_Yeo', Yeoresolution,'_CV75.deviations_ADHD_All.rds'))
+SCdata.ADHD$sex <- as.factor(SCdata.ADHD$sex)
+SCdata.ADHD$diagnosis <- factor(SCdata.ADHD$diagnosis, levels = c("TD", "ADHD"))
+table(SCdata.ADHD$diagnosis, SCdata.ADHD$site)
+
+SCdata.ADHD.post <- SCdata.ADHD %>% filter(visit=="1")
+
+Behavior <- read.xlsx("D:/xuxiaoyu/open_dataset_information/PKU6/demography/20250914_treatment_check.xlsx", sheet=1)
+Behavior$ID <- paste0("sub-", Behavior$id)
+SCdata.ADHD <- SCdata.ADHD %>% group_by(visit) %>% left_join(dplyr::select(Behavior, ID, medication, IA_B, HI_B, TO_B, IA_F, HI_F, TO_F), by="ID")
+
+# treated SC
+SCdata.ADHD.treatSC <- SCdata.ADHD %>% filter(ID %in% SCdata.ADHD.post$ID) # N=76
+table(SCdata.ADHD.treatSC$medication, SCdata.ADHD.treatSC$visit)
+
+# treated symptom
+SCdata.ADHD.treatSC <- SCdata.ADHD %>% drop_na(IA_F, HI_F, TO_F) %>% filter(ID %in% SCdata.ADHD.post$ID) # N=99
+SCdata.ADHD.treatSC <- SCdata.ADHD.treatSC %>% mutate(
+  IA_delta = (IA_F - IA_B),
+  HI_delta = (HI_F - HI_B),
+  TO_delta = (TO_F - TO_B)
+)
+SCdata.ADHD.treatSC$medication <- gsub("AXT", "ATX", SCdata.ADHD.treatSC$medication)
+SCdata.ADHD.treatSC$medication <- as.factor(SCdata.ADHD.treatSC$medication)
+table(SCdata.ADHD.treatSC$medication, SCdata.ADHD.treatSC$visit)
+
+# SC deviation change with age
+ROIset <- read.csv(paste0(resultFolder, "/SCDeviationChange_gamresults_ADHD_ABCDoverlap.csv"))
+ROI.set1 <- ROIset$parcel
+
+```
+
+## Step1 Regress age effect
+
+```{r}
+gammod.ADHD <- readRDS(paste0(interfileFolder, '/gammodelSigDiagnoseSCDeviation_NormSymptom_Age_Yeo', Yeoresolution,'_CV75_ADHD_all.rds'))
+
+names <- rep(NA, length(gammod.ADHD))
+for (i in 1:length(gammod.ADHD)){
+  thisResp <- as.character(gammod.ADHD[[i]]$terms[[2]])
+  names[i] <- thisResp
+}
+names(gammod.ADHD) <- names
+
+
+for (r in ROI.set1){
+  mod.tmp <- gammod.ADHD[[r]]
+  
+  pred.df <- predict(mod.tmp, newdata = SCdata.ADHD.treatSC)
+  SCdata.ADHD.treatSC[[paste0(r, "_resid")]] <- SCdata.ADHD.treatSC[[r]] - pred.df
+  
+}
+
+```
+
+## Step1 Repeated anova on SC deviation
+
+1. whether SC change after taking medication?
+2. whether SC * medication effect exist?
+3. whether SC differed by medication group?
+
+```{r}
+#| label: step1
+
+SCdata.ADHD.treatSC[,c("ID", "visit", "medication")] <- lapply(SCdata.ADHD.treatSC[,c("ID", "visit", "medication")], as.factor)
+SCdata.ADHD.treatSC <- as.data.frame(SCdata.ADHD.treatSC)
+new.df <- SCdata.ADHD.treatSC %>% pivot_wider(id_cols = ID, names_from = visit, values_from = ends_with("_deviationZ_resid"))
+# repeated anova
+result.sum <- list()
+for (region in ROI.set1){
+  SCdata.ADHD.treatSC[["tmp"]] <- SCdata.ADHD.treatSC[[paste0(region, "_resid")]]
+  
+  command.ttest <- paste0("pairedttest.res <- t.test(Pair(", region, "_resid_0,",  region, "_resid_1)~1, data=new.df)")
+  
+  eval(parse(text = command.ttest))
+  
+  
+  result <- ezANOVA(data = SCdata.ADHD.treatSC,
+                  dv = tmp,
+                  wid = ID,
+                  within = .(visit),
+                  between = .(medication),
+                  detailed = TRUE)
+  result.df <- data.frame(region =region, ttest.visit.T = pairedttest.res$statistic, ttest.visit.P = pairedttest.res$p.value, anova.visit.F = result$ANOVA$F[3], anova.visit.P = result$ANOVA$p[3],
+                          anova.medication.F = result$ANOVA$F[2], anova.medication.P = result$ANOVA$p[2],
+                          anova.int.F = result$ANOVA$F[4], anova.int.P = result$ANOVA$p[4])
+  
+  result.sum[[region]] <- result.df
+}
+
+result.df.sum <- do.call(rbind, result.sum)
+write.csv(result.df.sum, paste0(resultFolder, "/RANOVA_SCdeviation_medication.csv"), row.names = F)
+
+result.df.ROI1 <- result.df.sum %>% filter(region %in% ROI.set1)
+result.df.ROI1$anova.visit.P.fdr <- p.adjust(result.df.ROI1$anova.visit.P, method="fdr")
+result.df.ROI1$ttest.visit.P.fdr <- p.adjust(result.df.ROI1$ttest.visit.P, method="fdr")
+
+describeBy(SCdata.ADHD.treatSC[, paste0(result.df.ROI1$region[result.df.ROI1$ttest.visit.P.fdr<0.05], "_resid")], group=SCdata.ADHD.treatSC$visit, mat=T)
+
+
+### box plot
+# ROI.set1
+SCdata.ADHD.treat.l <- SCdata.ADHD.treatSC %>% pivot_longer(cols = all_of(ROI.set1), names_to="label", values_to = "value")
+SCdata.ADHD.treat.l$visit_medication <- interaction(SCdata.ADHD.treat.l$visit, SCdata.ADHD.treat.l$medication)
+
+for (i in 1:nrow(SCdata.ADHD.treat.l)){
+  region <- SCdata.ADHD.treat.l$label[i]
+  region <- gsub("SC.", "", region)
+  region <- gsub("_deviationZ", "", region)
+  
+  networklabel <- paste0(index2network(as.numeric(region))[1], "-", index2network(as.numeric(region))[2])
+  SCdata.ADHD.treat.l$label[i] <- networklabel
+}
+SCdata.ADHD.treat.l$visit <- factor(SCdata.ADHD.treat.l$visit, levels=c("0", "1"), labels=c("Pre", "Post"))
+
+# Stratified by medication type
+ggplot(SCdata.ADHD.treat.l, aes(x = visit_medication, y = value, fill=medication)) +
+  geom_boxplot(aes(fill = medication), outlier.shape = NA) +
+  geom_line(aes(x=visit_medication, y =value, group = ID), alpha = 0.4) +
+  geom_jitter(aes(color = medication), position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8), size = 1, alpha = 0.6) +
+  facet_wrap(~ label, nrow=3, scales = "free_y") +
+  scale_color_manual(values = c("#B2182B", "#1A1A1A"), labels = c("ATX", "MPH")) +
+  scale_fill_manual(values = c("#F4A582", "#BABABA"), labels = c("ATX", "MPH")) +
+  scale_x_discrete(breaks=waiver(), labels=c("pre", "post", "pre", "post"))+
+  labs(x = NULL, y = "SC deviation") +
+  theme_classic()+
+  theme(axis.text=element_text(size=18, color="black"),
+        axis.text.x=element_text(angle=45, hjust=1),
+        axis.title =element_text(size=18, color="black"),
+        aspect.ratio = 0.9,
+        plot.subtitle = element_text(size=20.5, hjust=0.1, vjust=-6, color="black"),
+        plot.background=element_rect(fill="transparent", color="transparent"),
+        panel.background=element_rect(fill="transparent", color="transparent"),
+        legend.text = element_text(size=18, color="black"),
+        legend.title = element_text(size=18, color="black"),
+        strip.background = element_rect(fill="transparent", color="transparent"),
+        strip.clip = "off", strip.text=element_text(size=18, color="black"))
+
+ggsave(paste0(FigureFolder, "/SCDeviation_MedicationSymptom/SCDeviation_pre_post_bymedication_ROI1.tiff"), width = 20, height=18, units = "cm")
+
+# Unstratified
+SCdata.ADHD.treatSC.l <- SCdata.ADHD.treatSC %>% pivot_longer(cols = all_of(ROI.set1), names_to="label", values_to = "value")
+SCdata.ADHD.treatSC.l$visit_label <- interaction(SCdata.ADHD.treatSC.l$visit, SCdata.ADHD.treatSC.l$label)
+
+SCdata.ADHD.treatSC.l$visit_label.num <- as.numeric(factor(SCdata.ADHD.treatSC.l$visit_label, levels=levels(SCdata.ADHD.treatSC.l$visit_label), labels=c(1:length(levels(SCdata.ADHD.treatSC.l$visit_label)))))
+
+for (i in 1:nrow(SCdata.ADHD.treatSC.l)){
+  region <- SCdata.ADHD.treatSC.l$label[i]
+  region <- gsub("SC.", "", region)
+  region <- gsub("_deviationZ", "", region)
+  
+  networklabel <- paste0(index2network(as.numeric(region))[1], "-", index2network(as.numeric(region))[2])
+  SCdata.ADHD.treatSC.l$label[i] <- networklabel
+}
+SCdata.ADHD.treatSC.l$visit <- factor(SCdata.ADHD.treatSC.l$visit, levels=c("0", "1"), labels=c("Pre", "Post"))
+
+ggplot(SCdata.ADHD.treatSC.l, aes(x = visit_label.num, y = value, fill=visit)) +
+  geom_boxplot(aes(fill = visit, group=visit_label.num), outlier.shape = NA) +
+  geom_line(aes(x=visit_label.num, y =value, group = interaction(ID, label)), alpha = 0.4) +
+  geom_jitter(aes(color = visit), position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8), size = 1, alpha = 0.6) +
+  scale_color_manual(values = c("#1F78B4", "#6A3D9A")) +
+  scale_fill_manual(values = c("#A6CEE3", "#CAB2D6")) +
+  scale_x_continuous(breaks = seq(from=1.5, to=19.5, by=2), labels=c("VA.B-FP.A", "FP.A-FP.B", "FP.A-DM.B", "FP.B-DM.B", "SM.A-SM.B", "SM.A-DM.B", "DA.A-DM.B", "DA.B-FP.A", "TP-FP.C", "FP.C-DM.B"))+
+  labs(x = NULL, y = "SC deviation") +
+  theme_classic()+
+  theme(axis.text=element_text(size=18, color="black"),
+        axis.text.x=element_text(angle=45, hjust=1),
+        axis.title =element_text(size=18, color="black"),
+        aspect.ratio = 0.6,
+        plot.subtitle = element_text(size=20.5, hjust=0.1, vjust=-6, color="black"),
+        plot.background=element_rect(fill="transparent", color="transparent"),
+        panel.background=element_rect(fill="transparent", color="transparent"),
+        legend.text = element_text(size=18, color="black"),
+        legend.title = element_text(size=18, color="black"),
+        strip.background = element_rect(fill="transparent", color="transparent"),
+        strip.clip = "off", strip.text=element_text(size=18, color="black"))
+
+ggsave(paste0(FigureFolder, "/SCDeviation_MedicationSymptom/SCDeviation_pre_post_all_ROI1.tiff"), width = 18, height=15, units = "cm")
+
+
+```
+
+
+
+## Step2 delta SC ~ delta symptom
+
+```{r}
+
+SCdata.ADHD.delta <- SCdata.ADHD.treatSC %>% group_by(ID) %>% arrange(ID, visit) %>% mutate(across(
+    .cols = all_of(paste0(ROI.set1, "_resid")),
+    .fns = ~ .x - lag(.x),
+    .names = "{.col}_delta"
+  ),
+  meanFD = mean(mean_fd)
+) %>% filter(visit=="1")
+
+# result.deltacorr <- mclapply(ROI.set1, function(region){
+#     # IA
+#   deltaresult.IA<-lm.fit.symp(paste0(region, "_delta"), dataname="SCdata.ADHD.delta", symp_var="IA_delta", covariates="age+sex+meanFD", IDvar="ID")
+#   # HI
+#   deltaresult.HI<-lm.fit.symp(paste0(region, "_delta"), dataname="SCdata.ADHD.delta", symp_var="HI_delta", covariates="age+sex+meanFD", IDvar="ID")
+#   # TO
+#   deltaresult.TO<-lm.fit.symp(paste0(region, "_delta"), dataname="SCdata.ADHD.delta", symp_var="TO_delta", covariates="age+sex+meanFD", IDvar="ID")
+#   
+#   deltaresult.df <- rbind(deltaresult.IA, deltaresult.HI, deltaresult.TO)
+#   
+#   return(deltaresult.df)
+# }, mc.cores=30)
+
+result.deltacorr <- list()
+for (region in ROI.set1){
+  # IA
+  deltaresult.IA<-lm.fit.symp(paste0(region, "_resid_delta"), dataname="SCdata.ADHD.delta", symp_var="IA_delta", covariates="age+sex+meanFD", IDvar="ID")
+  # HI
+  deltaresult.HI<-lm.fit.symp(paste0(region, "_resid_delta"), dataname="SCdata.ADHD.delta", symp_var="HI_delta", covariates="age+sex+meanFD", IDvar="ID")
+  # TO
+  deltaresult.TO<-lm.fit.symp(paste0(region, "_resid_delta"), dataname="SCdata.ADHD.delta", symp_var="TO_delta", covariates="age+sex+meanFD", IDvar="ID")
+
+  deltaresult.df <- rbind(deltaresult.IA, deltaresult.HI, deltaresult.TO)
+  
+  result.deltacorr[[region]] <- deltaresult.df
+}
+
+
+result.deltacorr.df <- do.call(rbind, lapply(result.deltacorr, as.data.frame))
+write.csv(result.deltacorr.df, paste0(resultFolder, "/deltaSCdeviation_deltaSymptom_medication.csv"), row.names = F)
+
+### Separate medication
+SCdata.ADHD.delta.ATX <- SCdata.ADHD.delta %>% filter(medication=="ATX")
+SCdata.ADHD.delta.MPH <- SCdata.ADHD.delta %>% filter(medication=="MPH")
+result.deltacorr.MPH <- list()
+for (region in ROI.set1){
+  # IA
+  deltaresult.IA<-lm.fit.symp(paste0(region, "_delta"), dataname="SCdata.ADHD.delta.MPH", symp_var="IA_delta", covariates="age+sex+meanFD", IDvar="ID")
+  # HI
+  deltaresult.HI<-lm.fit.symp(paste0(region, "_delta"), dataname="SCdata.ADHD.delta.MPH", symp_var="HI_delta", covariates="age+sex+meanFD", IDvar="ID")
+  # TO
+  deltaresult.TO<-lm.fit.symp(paste0(region, "_delta"), dataname="SCdata.ADHD.delta.MPH", symp_var="TO_delta", covariates="age+sex+meanFD", IDvar="ID")
+
+  deltaresult.df <- rbind(deltaresult.IA, deltaresult.HI, deltaresult.TO)
+  
+  result.deltacorr.MPH[[region]] <- deltaresult.df
+}
+
+result.deltacorr.MPH.df <- do.call(rbind, lapply(result.deltacorr.MPH, as.data.frame))
+
+
+
+
+result.deltacorr.df.ROI1 <- result.deltacorr.df %>% filter(parcel %in% paste0(ROI.set1, "_delta"))
+# plot
+for (region in ROI.set1){
+  # IA
+  df.IA.tmp <- lm.fit.symp(paste0(region, "_delta"), dataname="SCdata.ADHD.delta", symp_var="IA_delta", covariates="age+sex+meanFD", if_residual=T, IDvar="ID")
+  idx <- gsub("SC.", "", region)
+  idx <- gsub("_deviationZ", "", idx)
+  
+  networklabel <- paste0(index2network(as.numeric(idx))[1], "-", index2network(as.numeric(idx))[2])
+  
+  fig.scatter <- ggplot(df.IA.tmp)+
+    geom_smooth(aes(x=SCDelta.res, y=SymptomDelta.res), method="lm", color="black", linewidth=1)+
+    geom_point(aes(x=SCDelta.res, y=SymptomDelta.res), color="#810F7C")+
+    labs(x="\u0394SC deviation", y="Inattention symptom reduction", title=networklabel)+
+    theme_classic()+
+    theme(axis.text=element_text(size=18, color="black"),
+          axis.title =element_text(size=18, color="black"),
+          aspect.ratio = 0.8,
+          plot.title = element_text(size=18, hjust=0.5, vjust=0, color="black"),
+          plot.background=element_rect(fill="transparent"),
+          panel.background=element_rect(fill="transparent"),
+          legend.text = element_text(size=15, color="black"),
+          legend.title = element_text(size=15, color="black"))
+  
+  ggsave(paste0(FigureFolder, "/SCDeviation_MedicationSymptom/delta_scatter/deltaIA_delta", region,".tiff"), fig.scatter,width = 14, height=12, units = "cm")
+  
+  # HI
+  df.HI.tmp <- lm.fit.symp(paste0(region, "_delta"), dataname="SCdata.ADHD.delta", symp_var="HI_delta", covariates="age+sex+meanFD", if_residual=T, IDvar="ID")
+  fig.scatter <- ggplot(df.HI.tmp)+
+    geom_smooth(aes(x=SCDelta.res, y=SymptomDelta.res), method="lm", color="black", linewidth=1)+
+    geom_point(aes(x=SCDelta.res, y=SymptomDelta.res), color="#810F7C")+
+    labs(x="\u0394SC deviation", y="Hyperactivity symptom reduction", title=networklabel)+
+    theme_classic()+
+    theme(axis.text=element_text(size=18, color="black"),
+          axis.title =element_text(size=18, color="black"),
+          aspect.ratio = 0.8,
+          plot.title = element_text(size=18, hjust=0.5, vjust=0, color="black"),
+          plot.background=element_rect(fill="transparent"),
+          panel.background=element_rect(fill="transparent"),
+          legend.text = element_text(size=15, color="black"),
+          legend.title = element_text(size=15, color="black"))
+  
+  ggsave(paste0(FigureFolder, "/SCDeviation_MedicationSymptom/delta_scatter/deltaHI_delta", region,".tiff"),fig.scatter, width = 14, height=12, units = "cm")
+  
+  # TO
+  df.TO.tmp <- lm.fit.symp(paste0(region, "_delta"), dataname="SCdata.ADHD.delta", symp_var="TO_delta", covariates="age+sex+meanFD", if_residual=T, IDvar="ID")
+  
+  fig.scatter <- ggplot(df.TO.tmp)+
+    geom_smooth(aes(x=SCDelta.res, y=SymptomDelta.res), method="lm", color="black", linewidth=1)+
+    geom_point(aes(x=SCDelta.res, y=SymptomDelta.res), color="#810F7C")+
+    labs(x="\u0394SC deviation", y="Total symptom reduction", title=networklabel)+
+    theme_classic()+
+    theme(axis.text=element_text(size=18, color="black"),
+          axis.title =element_text(size=18, color="black"),
+          aspect.ratio = 0.8,
+          plot.title = element_text(size=18, hjust=0.5, vjust=0, color="black"),
+          plot.background=element_rect(fill="transparent"),
+          panel.background=element_rect(fill="transparent"),
+          legend.text = element_text(size=15, color="black"),
+          legend.title = element_text(size=15, color="black"))
+  
+  ggsave(paste0(FigureFolder, "/SCDeviation_MedicationSymptom/delta_scatter/deltaTO_delta", region,".tiff"), fig.scatter, width = 14, height=12, units = "cm")
+  
+}
+
+
+
+```

@@ -1,0 +1,287 @@
+---
+title: "CuiBP_exclusion_demo"
+output: html_document
+date: "2025-07-19"
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(psych)
+library(MplusAutomation)
+library(openxlsx)
+library(rjson)
+library(dplyr)
+library(readxl)
+homepath <- "D:/xuxiaoyu/project_files/BP_youth_data"
+result_path <- file.path(homepath, "demography")
+demo_path <- file.path(homepath, "behavior")
+qcpath <- file.path(homepath, "qc")
+
+basic_demo <- read.xlsx(paste0(demo_path, "/basic_demography20250418.xlsx"), detectDates=T)
+basic_demo$age <- as.numeric(difftime(basic_demo$Visitday, basic_demo$Birthday, units = "days") / 365)
+basic_demo2 <- read.xlsx(paste0(demo_path, "/basic_demography20241102.xlsx"), detectDates=T)
+basic_demo2$age <- as.numeric(difftime(basic_demo2$Visitday, basic_demo2$Birthday, units = "days") / 365)
+basic_demo2 <- basic_demo2 %>% filter(! ID %in% basic_demo$ID)
+basic_demo2$Hear_problems <- gsub(0, 2, basic_demo2$Hear_problems)
+basic_demo2$Colour_blindness <- gsub(0, 2, basic_demo2$Colour_blindness)
+
+basic_demo2 <- basic_demo2 %>% dplyr::rename(c(if_other_disease="If.ever.be.diagnosed.by.some.diseases?", Birth_disease_type="If.so,.which.kind?"))
+vars <- intersect(names(basic_demo), names(basic_demo2))
+basic_demo.df <- rbind(basic_demo[,vars], basic_demo2[,vars])
+
+# MRI table
+MRItable <- read.csv(paste0(demo_path, "/MRItable20250418.csv"))
+names(MRItable) <- c("ID", "Name", "familyID", "Visitday", "subID", "Height", "Weight", "Birthday", "Age", "Sex", "SarttimeS1", "EndtimeS1", "SarttimeS2", "EndtimeS2", "MRIcompleteness", "MRIrawdataCheck", "MRINote", "MRItester", "Video", "TaskLoop1", "Appcompleteness", "APPtester", "Othernote", "Blank", "DataCompleteness", "DataQC", "DataBackup", "Blank2", "QCcompleteness")
+MRItable <- MRItable[,-c(30:42)]
+MRItable <- MRItable %>% drop_na(familyID)
+MRIdatatab <- read.csv(paste0(demo_path, "/brainproject_subinfo.csv"))
+
+# demography (Cong Jing checked)
+basic_demoCJ <- read.xlsx(paste0(demo_path, "/demography_CJ.xlsx"), detectDates=T)
+names(basic_demoCJ) <- c("subID", "Sex", "age")
+basic_demoCJ$ID <- substr(basic_demoCJ$subID, 16, 18)
+basic_demoCJ <- basic_demoCJ %>% left_join(select(MRItable, ID, Name), by="ID")
+
+# Not in the TD table
+basic_demo.df.other <- basic_demo.df %>% filter(! basic_demo.df$ID %in% basic_demoCJ$ID)
+
+```
+
+### 1) Subjects with MRI data
+```{r MRI}
+MRIdatatab <- MRIdatatab %>% filter(if_dwi==1, if_dwifmap==1)
+MRIdatatab$ID <- substr(MRIdatatab$sub_id, 16, 18)
+# the subject ID is exceptional 
+MRIdatatab$ID[MRIdatatab$sub_id=="sub-THU20240115LYJ"] <- 173
+
+# basic_demo clean ID
+abnormalID <- which((nchar(basic_demo.df.other$ID) != 3) & !(str_detect(basic_demo.df.other$ID, "EFI")) & !(str_detect(basic_demo.df.other$ID, "XY")))
+basic_demo.df.other[abnormalID, c("Name", "ID")]
+MRItable %>% filter(Name %in% basic_demo.df.other$Name[abnormalID]) %>% select("Name", "ID")
+basic_demo.df.other$ID[basic_demo.df.other$Name=="胡家睿"] <- "356"
+basic_demo.df.other$ID[basic_demo.df.other$Name=="宛浩辰"] <- "218"
+basic_demo.df.other$ID[basic_demo.df.other$Name=="孙歆然"] <- "385"
+
+## Correct wrong ID in basic_demo.df
+basic_demo.df.other <- basic_demo.df.other %>% left_join(select(MRItable, ID, Name, Age, Sex, subID), by="Name")
+
+basic_demo.df.other <- basic_demo.df.other %>% mutate(
+  ID = case_when(is.na(ID.y) ~ ID.x,
+                 .default = ID.y)
+)
+
+basic_demo.df.other$subID <- gsub("_", "", basic_demo.df.other$subID)
+basic_demo.df.other$subID <- paste0("sub-", basic_demo.df.other$subID)
+basic_demo.df.other$Sex <- basic_demo.df.other$Sex.x
+basic_demo.df.other$Age <- as.numeric(basic_demo.df.other$Age)
+basic_demo.df.other <- basic_demo.df.other %>% mutate(
+  age = case_when(
+    is.na(Age) ~ age,
+    .default = as.numeric(Age)
+  ))
+
+
+basic_demo.df0 <- rbind(basic_demoCJ, basic_demo.df.other[c("subID", "Sex", "age", "ID", "Name")])
+
+```
+
+
+```{r MRI}
+# restore the exceptional ID in the basic_demo.df0
+exceptionalID = which(nchar(basic_demo.df0$ID) != 3)
+exceptional.df <-basic_demo.df0[exceptionalID, c("Name", "ID")]
+# There two records of subject "吴悠"
+basic_demo.df0 <- basic_demo.df0 %>%
+  filter(ID != "EFI021")
+
+basic_demo.df2 <- basic_demo.df0 %>% filter(! ID %in% exceptional.df$ID, str_detect(subID, "THU")) %>% drop_na(subID)
+
+### Have MRI data
+basic_demo.df3 <- basic_demo.df2 %>% filter(subID %in% MRIdatatab$sub_id) # The rest subjects are in EFI cohort.
+
+# not_in_mri_subjects: 1. no questionnaire; 2. ID unmatch
+not_in_demo_subjects <- MRIdatatab %>% 
+  filter(! (ID %in% basic_demo.df3$ID))
+# restore the unmatched ID
+
+not_in_demo_subjects_info <- MRItable %>% 
+  filter(ID %in% not_in_demo_subjects$ID)
+# restore the unmatched ID
+write.xlsx(not_in_demo_subjects_info, paste0(result_path, "/missing questionnaire.xlsx"), rowNames = F)
+
+basic_demo.df3 <- basic_demo.df3 %>% distinct(subID, .keep_all = T)
+
+## With MRI data
+qcfiles <- list.files(path = qcpath, recursive = T)
+MRsublist<- gsub(".json", "", qcfiles)
+MRsublist.df <- data.frame(subID=MRsublist)
+MRsublist.df$ID <- substr(MRsublist, 16,18)
+
+basic_demo.df4 <- basic_demo.df3 %>% filter(subID %in% MRsublist.df$subID)
+
+print(paste(sum(!is.na(basic_demo.df4$subID)), "subjects have successfully reconstructed SC matrix."))
+
+```
+### 2) Age & Sex
+
+```{r agesex}
+
+basic_demo.df4$Sex <- gsub("1", "M", basic_demo.df4$Sex)
+basic_demo.df4$Sex <- gsub("2", "F", basic_demo.df4$Sex)
+basic_demo.df4$Sex <- gsub("female", "F", basic_demo.df4$Sex)
+basic_demo.df4$Sex <- gsub("male", "M", basic_demo.df4$Sex)
+basic_demo.df4$Sex <- gsub("女", "F", basic_demo.df4$Sex)
+basic_demo.df4$Sex <- gsub("男", "M", basic_demo.df4$Sex)
+basic_demo.df4$Sex <- as.factor(basic_demo.df4$Sex)
+
+basic_demo.df4 <- basic_demo.df4 %>%
+  filter(age <= 15.5)
+
+summary(basic_demo.df4[, c("age", "Sex")])
+allnum5 <- nrow(basic_demo.df4)
+print(paste(nrow(basic_demo.df4), "participants are under 15.5 years old."))
+allnum <- nrow(basic_demo.df4)
+
+```
+
+### 3) Sensory issues
+The exclusion criteria of HBN including hearing or visual impairment that prevents participation in study-released tasks. No more exclusion for sensory issues in this study.
+
+```{r sensory}
+
+basic_demo.df5 <- basic_demo.df4 %>% left_join(select(basic_demo.df, Hear_problems, Colour_blindness, ID), by="ID") %>% distinct(ID, .keep_all = T)
+
+basic_demo.df5 <- basic_demo.df5[-which(basic_demo.df5$Colour_blindness==1), ]
+if (sum(basic_demo.df5$Hear_problems==1, na.rm = T) > 0){
+  basic_demo.df5 <- basic_demo.df5[-which(basic_demo.df5$Hear_problems==1), ]
+}
+
+allnum2 <- nrow(basic_demo.df5)
+print(paste((allnum-allnum2), "participants were excluded due to sensory issues.", allnum2, "left."))
+
+```
+### 4) Intellectual disability
+
+Only participants with IQ over 70 were included.
+
+
+### 5) Major medical or neurological conditions
+
+Children with Congenital_heartDisease were excluded.
+```{r Med}
+
+deleted_ids <- basic_demo %>% 
+  filter(str_detect(Birth_disease_type, "先心病")) %>% 
+  pull(ID)
+
+basic_demo.df5 <- basic_demo.df5 %>%
+  filter(!(ID %in% deleted_ids))
+
+allnum3 <- nrow(basic_demo.df5)
+print(paste((allnum2-allnum3), "participants were excluded due to major medical issues.", allnum3, "left."))
+
+```
+
+### 6) MRI qc
+
+```{r MRIqc}
+
+basic_demo.df5$Birth_disease_type <- NULL
+basic_demo.df5$if_other_disease <- NULL
+
+for (i in 1:nrow(basic_demo.df5)){
+  subIDtmp <- basic_demo.df5$subID[i]
+  filename <- paste0(qcpath, "/",subIDtmp, ".json" )
+  if (file.exists(filename)){
+    qcjson <- rjson::fromJSON(file=filename)
+    basic_demo.df5$mean_fd[i] <- qcjson$subjects[[1]]$mean_fd
+  }
+}
+
+basic_demo.df5 <- basic_demo.df5 %>% filter(mean_fd < mean(mean_fd)+3*sd(mean_fd))
+allnum6 <- nrow(basic_demo.df5)
+print(paste((allnum5-allnum6), "participants were excluded due to excessive head motion.", allnum6, "left."))
+
+# "sub-THU20240120180WKY" "sub-THU20240420262ZYK" SC not reconstructed successfully.
+basic_demo.df5 <- basic_demo.df5 %>% filter(! subID %in% c("sub-THU20240120180WKY", "sub-THU20240420262ZYK"))
+
+```
+
+
+### Merge handedness
+
+```{r handedness}
+
+basic_demo.df[grep("^Handness", names(basic_demo.df))] <- lapply(basic_demo.df[grep("^Handness", names(basic_demo.df))], function(x) {
+  x[is.na(x)] <- 0
+  return(x)
+})
+
+basic_demo.df <- basic_demo.df %>% mutate(
+  Tscore=rowSums(across(starts_with("Handness"))),
+  Dscore=rowSums(across(ends_with("_R"))) - rowSums(across(ends_with("_L")))
+)
+
+basic_demo.df <- basic_demo.df %>% mutate(
+  Handednessscore=(Dscore / Tscore)*100,
+  Handedness=case_when(
+    is.na(Handednessscore) ~ NA,
+    Handednessscore>=60 ~ "right",
+    Handednessscore<=-60 ~ "left",
+    .default = "mixed"
+  )
+)
+
+
+basic_demo.df$Handedness <- as.factor(basic_demo.df$Handedness)
+summary(basic_demo.df$Handedness)
+# merge
+basic_demo.df5 <- basic_demo.df5 %>% left_join(select(basic_demo.df, ID, Handednessscore, Handedness), by="ID") %>%
+  distinct(ID, .keep_all = T)
+summary(basic_demo.df5$Handedness)
+
+```
+
+
+
+### Merge ICV
+
+```{r ICV}
+ICV_BP <- read.csv(paste0(demo_path, "/ICV_BP.txt"), header = F)
+ICV_BP$V3 <- NULL
+names(ICV_BP) <- c("subID", "ICV")
+
+basic_demo.df5 <- basic_demo.df5 %>% left_join(ICV_BP, by="subID")
+write.csv(basic_demo.df5, paste0(result_path, "/basic_demo_merge_screen.csv"), row.names = F)
+
+```
+
+
+
+### add ADHD label
+
+```{r}
+
+ADHD_df <- read_xlsx(paste0(result_path, "/QC_cibir.xlsx"))
+ADHD_df <- ADHD_df %>%
+  mutate(ADHD = ifelse(str_detect(Group, "ADHD"), 1, 0))
+ADHD_df$ADHD[is.na(ADHD_df$ADHD)] <- 0
+ADHD_df$subID <- ADHD_df$ID
+
+basic_demo.df5 <- basic_demo.df5 %>%
+  left_join(ADHD_df %>% select(subID, ADHD), by = "subID")
+
+abnormalID <- which(is.na(basic_demo.df5$ADHD))
+basic_demo.df5[abnormalID, c("subID", "Name", "ID")]
+basic_demo.df5[basic_demo.df5$ID == 276, "ADHD"] <- 1
+basic_demo.df5[basic_demo.df5$subID == "sub-THU20240115LYJ", "ADHD"] <- 0
+
+write.csv(basic_demo.df5, paste0(result_path, "/basic_demo_merge_screen.csv"), row.names = F)
+
+```
+
+
+
+

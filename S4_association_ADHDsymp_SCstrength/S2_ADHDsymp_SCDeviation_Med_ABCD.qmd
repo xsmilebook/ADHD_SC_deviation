@@ -1,0 +1,152 @@
+---
+title: "V3_ADHDsymp_SCDeviation_Med"
+author:
+  - name: Xiaoyu Xu
+    orcid: 0000-0002-7349-3366
+    email: xuxiaoyu@cibr.ac.cn
+    url: https://scholar.google.com/citations?user=G0jeI1AAAAAJl
+    affiliation: 
+      - name: Chinese Institute for Brain Research, Beijing (CIBR)
+        group: CUIZAIXU Lab
+        url: https://cuilab.cibr.ac.cn/
+date: "2025-07-03"
+format: 
+  html:
+    code-fold: true
+    code-tools: true
+    theme: Materia
+    toc: true
+    toc_depth: 3
+    toc-expand: 1
+    toc_float: true
+    toc-location: left
+    number-sections: true
+    number-depth: 3
+    embed-resources: true
+---
+
+
+```{r}
+#| label: load-packages-data
+#| include: false
+
+rm(list=ls())
+library(mgcv)
+library(parallel)
+library(tidyverse)
+library(psych)
+# set resolution
+Yeoresolution <- 17
+if (Yeoresolution == 7){
+  Yeoresolution.delLM = 6
+}else if (Yeoresolution == 17){
+  Yeoresolution.delLM = 15
+}
+element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
+# input directory
+wd <- getwd()
+homepath <- str_split_i(wd, "Normative_model", 1)
+demopath <- paste0(homepath, '/Normative_model/demography')
+interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
+functionFolder <- paste0(homepath, "/Normative_model/functions")
+resultFolder <- paste0(homepath, "/Normative_model/results_ABCD")
+functionFolder.SCDev <- paste0(homepath, "/SC_development/Rcode_SCdevelopment/gamfunction")
+FigureFolder <- paste0(homepath, '/Normative_model/Figures_ABCD/Yeo', Yeoresolution,'/CV75')
+source(paste0(functionFolder.SCDev, "/SCrankcorr.R"))
+#source(paste0(functionFolder, "/linearmediation_longitudinal.R"))
+source(paste0(functionFolder, "/parallelmediation.R"))
+source(paste0(functionFolder, "/plotmatrix.R"))
+# Load data
+SCdata.sum75.merge.ADHDTD <- readRDS(paste0(interfileFolder, '/SCdata_Yeo',Yeoresolution, '_CV75_sumSCinvnode.deviations_TDtest_ADHD.rds'))
+SCdata.sum75.merge.ADHDTD$sex <- as.factor(SCdata.sum75.merge.ADHDTD$sex)
+SCdata.sum75.merge.ADHDTD$meanFD <- as.numeric(SCdata.sum75.merge.ADHDTD$meanFD)
+SCdata.sum75.merge.ADHDTD$if_TD <- factor(SCdata.sum75.merge.ADHDTD$if_TD, levels = c("TD", "ADHD"))
+SCdata.ADHD <- SCdata.sum75.merge.ADHDTD %>% filter(if_TD=="ADHD")
+SCdata.TD <- SCdata.sum75.merge.ADHDTD %>% filter(if_TD=="TD")
+
+gamresultsum.df.ADHD <- readRDS(paste0(interfileFolder, '/AllSCDeviation_NormSymptom_Age_Yeo', Yeoresolution,'_CV75_ADHD.rds'))
+gamresultsum.df.ADHD.SC <- gamresultsum.df.ADHD[str_detect(gamresultsum.df.ADHD$parcel, "SC."),]
+#gamresultsum.df.ADHD.SC$bootstrap_p.fdr <- p.adjust(gamresultsum.df.ADHD.SC$bootstrap_pvalue, method="fdr")
+# interaction.df <- readRDS(paste0(interfileFolder, "/Deviation_TDtest-ADHDall_SC", element_num,".rds"))
+# interaction.df <- interaction.df[seq(from=2, to=2*element_num, by = 2),]
+# 
+# interaction.df <- interaction.df %>% filter(parcel %in% gamresultsum.df.ADHD.SC$parcel[gamresultsum.df.ADHD.SC$bootstrap_p.fdr<0.05])
+# 
+# interaction.df$bootstrap_pvalue.fdr <- p.adjust(interaction.df$bootstrap_pvalue, method = "fdr")
+
+#sigedge.all <- interaction.df$parcel[interaction.df$bootstrap_pvalue.fdr < 0.05]
+
+childDeviation <- readRDS(paste0(interfileFolder, "/GroupcompareDeviation_TD-ADHDall_SC_Yeo", element_num, "_child_controlAgeSex.rds"))
+sigedge.all <- childDeviation$parcel[childDeviation$p.fdr < 0.05]
+
+gamresultsum.df.ADHD.SC <- gamresultsum.df.ADHD.SC %>% filter(parcel %in% sigedge.all)
+gamresultsum.df.ADHD.SC$bootstrap_pvalue.fdr <- p.adjust(gamresultsum.df.ADHD.SC$bootstrap_pvalue, method="fdr")
+gamresultsum.df.ADHD.SC$bootstrap_p.fdr <- p.adjust(gamresultsum.df.ADHD.SC$bootstrap_pvalue, method="fdr")
+interaction.df <- readRDS(paste0(interfileFolder, "/Deviation_TDtest-ADHDall_SC", element_num,".rds"))
+interaction.df <- interaction.df[seq(from=2, to=2*element_num, by = 2),]
+
+interaction.df <- interaction.df %>% filter(parcel %in% gamresultsum.df.ADHD.SC$parcel[gamresultsum.df.ADHD.SC$bootstrap_p.fdr<0.05])
+
+interaction.df$bootstrap_pvalue.fdr <- p.adjust(interaction.df$bootstrap_pvalue, method = "fdr")
+
+sigedge.all <- interaction.df$parcel[interaction.df$bootstrap_pvalue.fdr < 0.05]
+
+Association_symptom <- read.csv(paste0(resultFolder, "/SCDeviation_Symptom_Age_CV75_Yeo17_ADHDall_controlAgeSex.csv"))
+
+```
+
+
+# Step1 Mediation analysis (linear)
+
+Age --> SC Deviation --> Symptoms
+
+```{r}
+#| label: Step1
+
+dataname <- "SCdata.ADHD"
+symptomvar <- c("cbcl_scr_syn_external_t", "cbcl_scr_dsm5_adhd_t","cbcl_scr_syn_attention_t")
+X_var <- "age"
+
+# linear mediation
+for (VOI in symptomvar[2:3]){
+  #if (!file.exists(paste0(interfileFolder, '/MultiMediation_SCDeviation_', VOI,'_Age_CV75_Yeo', Yeoresolution,'_ADHDall_controlSex.rds'))){
+    print(VOI)
+    sigedge_symp <- Association_symptom %>% filter(parcel == VOI, bootstrap.P.fdr < 0.05)
+    
+    mediator <- sigedge_symp$int_var[sigedge_symp$int_var %in% sigedge.all]
+    
+    resultsum.df <- parallelmediation(mediator, dataname, out_var=VOI, X_var, covariates="sex+meanFD", boottime=10000, longitudinal=T)
+    
+    saveRDS(resultsum.df, paste0(interfileFolder, '/MultiMediation_SCDeviation_', VOI,'_Age_CV75_Yeo', Yeoresolution,'_ADHDall_controlSex.rds'))
+  #}
+}
+
+
+SC_symptom.list <- list()
+
+for (VOI in symptomvar){
+  resultsum.df <- readRDS(paste0(interfileFolder, '/MultiMediation_SCDeviation_', VOI,'_Age_CV75_Yeo', Yeoresolution,'_ADHDall_controlSex.rds'))
+  SC_symptom.list[[VOI]] <- resultsum.df
+  
+}
+
+View(SC_symptom.list[["cbcl_scr_dsm5_adhd_t"]]$mediation) # SC.119_deviationZ
+SC_symptom.list[["cbcl_scr_dsm5_adhd_t"]]$mediator
+
+View(SC_symptom.list[["cbcl_scr_syn_attention_t"]]$mediation) # SC.109_deviationZ
+SC_symptom.list[["cbcl_scr_syn_attention_t"]]$mediator
+
+View(SC_symptom.list[["cbcl_scr_syn_external_t"]]$mediation) # "SC.109_deviationZ" "SC.119_deviationZ"
+SC_symptom.list[["cbcl_scr_syn_external_t"]]$mediator
+
+p.adjust(c(SC_symptom.list[["cbcl_scr_syn_external_t"]]$mediation$pvalue[21:22], SC_symptom.list[["cbcl_scr_dsm5_adhd_t"]]$mediation$pvalue[16], SC_symptom.list[["cbcl_scr_syn_attention_t"]]$mediation$pvalue[21:22]), method="fdr")
+
+# 0.01485114 0.01485114 0.01485114 0.01583564
+# .02180093 0.02180093 0.02180093 0.06777630 0.12798793
+
+```
+
+
+
+
+

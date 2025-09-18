@@ -1,0 +1,326 @@
+---
+title: "S1_selectparameters_EFNYnoCCNP"
+format: html
+editor: visual
+author: Xiaoyu Xu
+date: 1/22/2025
+---
+
+```{r}
+#| label: load-packages-data
+#| include: false
+library(ggplot2)
+library(tidyverse)
+library(mgcv)
+library(readxl)
+library(openxlsx)
+library(parallel)
+library(gamlss)
+library(scales)
+library(MatchIt)
+library(tableone)
+rm(list=ls())
+# set resolution
+Yeoresolution <- 17
+if (Yeoresolution == 7){
+  Yeoresolution.delLM = 6
+}else if (Yeoresolution == 17){
+  Yeoresolution.delLM = 15
+}
+element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
+
+# input directory
+wd <- getwd()
+homepath <- str_split_i(wd, "Normative_model", 1)
+demopath <- paste0(homepath, '/Normative_model/demography')
+interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_EFNYnoCCNP')
+interfileFolder_ABCD <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
+functionFolder <- paste0(homepath, "/Normative_model/functions")
+resultFolder <- paste0(homepath, "/Normative_model/results_EFNYnoCCNP")
+functionFolder.SCDev <- paste0(homepath, "/SC_development/Rcode_SCdevelopment/gamfunction")
+FigureFolder <- paste0(homepath, '/Normative_model/Figures_EFNYnoCCNP/Yeo', Yeoresolution,'/CV75')
+
+# load data
+SCdata <- readRDS(paste0(interfileFolder, '/SCdata_Yeo',Yeoresolution, '_CV75_sumSCinvnode.sum.msmtcsd.merge.rds'))
+SCdata$sex <- gsub("Female", "F", SCdata$sex)
+SCdata$sex <- gsub("Male", "M", SCdata$sex)
+SCdata$sex <- as.factor(SCdata$sex)
+SCdata$diagnosis <- factor(SCdata$ADHD, levels=c(0,1), labels = c("TD", "ADHD"))
+table(SCdata$diagnosis, SCdata$site)
+
+source(paste0(functionFolder, "/Compare_distributions_gamlss.R"))
+#SCdeviationAge_ABCD.ADHD <- readRDS(paste0(interfileFolder_ABCD, "/SigDiagnoseSCDeviation_NormSymptom_Age_Yeo", Yeoresolution ,"_CV75_ADHD.rds")) 
+
+```
+
+## Step 1 Prepare data
+
+1)  All TD will be assigned in Traing set.
+
+```{r}
+#| label: Step1.1
+
+SCdata.TD.training <- SCdata %>% filter(diagnosis=="TD")
+
+n0 = nrow(SCdata.TD.training)
+SCdata.TD.training <- SCdata.TD.training %>% mutate(WB_SCmean = rowMeans(select(.,starts_with("SC."))))
+SCdata.TD.training <- SCdata.TD.training %>% filter(WB_SCmean>=mean(WB_SCmean)-3*sd(WB_SCmean), WB_SCmean<=mean(WB_SCmean)+3*sd(WB_SCmean))
+n1 = nrow(SCdata.TD.training)
+boxplot(SCdata.TD.training$WB_SCmean)
+print(paste(n1, "obs included,", (n0-n1), "obs were removed due to extreme deviation of WB_SCmean."))
+# 292 obs included, 4 obs were removed due to extreme deviation of WB_SCmean.
+
+SCdata.TD.training[,c("site", "sex")] <- lapply(SCdata.TD.training[,c("site", "sex")], as.factor)
+
+saveRDS(SCdata.TD.training, paste0(interfileFolder, "/SCdata.allTD_EFNYnoCCNP.SCYeo", element_num, ".rds"))
+
+```
+
+## Step 2 Select parameters
+
+### 2.1 Select distribution families.
+
+We are going to select the best distribution from 24 continuous distributions.
+
+```{r}
+#| label: Step2.1
+num_cores <- detectCores() - 8
+cl <- makeCluster(num_cores)
+clusterExport(cl, varlist = c("functionFolder"), envir = .GlobalEnv)
+invisible(clusterEvalQ(cl, {
+  library(ggplot2)
+  library(tidyverse)
+  library(mgcv)
+  library(readxl)
+  library(openxlsx)
+  library(parallel)
+  library(gamlss)
+  library(scales)
+  source(paste0(functionFolder, "/Compare_distributions_gamlss.R"))
+}))
+
+## WB mean SC
+SCdata.TD.trainset <- SCdata.TD.training %>% mutate(WB_SCmean = rowMeans(dplyr::select(.,dplyr::starts_with("SC."))))
+dataname <- "SCdata.TD.trainset"
+smoothvar <- "age"
+IDvar <- "ID"
+bs.df = 3
+covariates <- "sex+mean_fd"
+randomvar="site"
+
+dependentvar <- "WB_SCmean"
+outlist.tmp <- gamlss_comparedistribution(dataname, dependentvar, smoothvar,IDvar, bs.df, covariates, randomvar, cl)
+# The best distibution for WB_SCmean is exGAUS.
+performance.tmp <- outlist.tmp$performance
+performance_family <- performance.tmp
+write.xlsx(performance_family, paste0(resultFolder, "/distributiontest_TD_WB_meanSC_Yeo", Yeoresolution,"_all.xlsx"))
+
+
+if (! file.exists(paste0(resultFolder, "/distributiontest_TD_Edgelevel_Yeo", Yeoresolution,".rds"))){
+  performancelist <- list()
+  for (i in 1:element_num){
+    dependentvar <- paste0("SC.", i)
+    outlist.tmp <- gamlss_comparedistribution(dataname, dependentvar, smoothvar,IDvar, bs.df, covariates, randomvar, cl)
+    performance.tmp <- outlist.tmp$performance
+    performancelist[[i]] <- outlist.tmp$performance
+  }
+  saveRDS(performancelist, paste0(resultFolder, "/distributiontest_TD_Edgelevel_Yeo", Yeoresolution,".rds"))
+}else{
+  
+  performancelist <- readRDS(paste0(resultFolder, "/distributiontest_TD_Edgelevel_Yeo", Yeoresolution,".rds"))
+  
+}
+
+performance.df <- do.call(rbind, performancelist)
+performance.df <- performance.df %>% group_by(dependentvar) %>%
+  mutate(family = performancelist[[1]]$distribution)
+performance.df <- performance.df %>% filter(converged==T) %>% group_by(family) %>% filter(n() == element_num)
+performance.df <- performance.df %>% group_by(dependentvar) %>%
+  mutate(rankorder = rank(BIC))
+
+performance.df.sum <- performance.df %>% group_by(family) %>% 
+  summarise(meanBICR = mean(rankorder), bestnum = sum(rankorder==1))
+print(paste(performance.df.sum$family[which.max(performance.df.sum$bestnum)], "is selected as it is the best family for most edges."))
+## BCPEo is selected as it is the best family for most edges. 
+## For 120 edges BCPEo is selected as it is the best family for most edges.
+
+# plot
+# WB_meanSC
+performance.WB <- read.xlsx(paste0(resultFolder, "/distributiontest_TD_WB_meanSC_Yeo", Yeoresolution,"_all.xlsx"))
+performance.tmp <- performance.WB %>% filter(converged==T)
+performance.tmp$BIC <- performance.tmp$BIC - max(performance.tmp$BIC)
+performance.tmp <- performance.tmp %>% filter(BIC < quantile(BIC, 0.55))
+performance.tmp$distribution <- factor(performance.tmp$distribution, levels=performance.tmp$distribution[order(performance.tmp$BIC)])
+ggplot(data=performance.tmp)+
+  geom_bar(aes(x=distribution, y=BIC),stat="identity", fill="#B4D3E7")+
+  labs(x="Distribution family", y="BIC", title = "Whole brain mean SC strength")+theme_classic()+
+  theme(panel.background = element_rect(fill="white"),
+        plot.background = element_rect(fill = "white",colour = NA),aspect.ratio = 0.7,
+        plot.title = element_text(color = "black", size = 14, hjust = 0.5),
+        axis.title = element_text(color = "black", size = 14),axis.line = element_line(linewidth = 0.4),
+        axis.ticks = element_line(linewidth = 0.4),
+        axis.text.y = element_text(color = "black",size = 14),
+        axis.text.x = element_text(color = "black",angle = 45, hjust = 1, size = 14),
+        legend.position = "none")
+ggsave(paste0(FigureFolder, "/Selectparameter/distribution_WBmeanSC_all.tiff"), width=12, height=10, units = "cm")
+ggsave(paste0(FigureFolder, "/Selectparameter/distribution_WBmeanSC_all.svg"), width=12, height=10, units = "cm")
+
+# All edges
+performance.df.sum$family <- factor(performance.df.sum$family, levels = performance.df.sum$family[order(performance.df.sum$bestnum, decreasing = T)])
+ggplot(data=performance.df.sum)+
+  geom_bar(aes(x=family, y=bestnum),stat="identity", fill="#B4D3E7")+
+  labs(x="Distribution family", y="Frequency")+theme_classic()+
+  theme(panel.background = element_rect(fill="white"),
+        plot.background = element_rect(fill = "white",colour = NA),aspect.ratio = 0.7,
+        plot.title = element_text(color = "black", size = 14, hjust = 0.5),
+        axis.title = element_text(color = "black", size = 14),axis.line = element_line(linewidth = 0.4),
+        axis.ticks = element_line(linewidth = 0.4),
+        axis.text.y = element_text(color = "black",size = 14),
+        axis.text.x = element_text(color = "black",angle = 45, hjust = 1, size = 14),
+        legend.position = "none")
+
+ggsave(paste0(FigureFolder, "/Selectparameter/distribution_all.tiff"), width=12, height=10, units = "cm")
+ggsave(paste0(FigureFolder, "/Selectparameter/distribution_all.svg"), width=12, height=10, units = "cm")
+
+```
+
+### 2.2 Select degree of freedom
+
+we are going to select the best degree of freedom from 2 to 6.
+
+```{r}
+#| label: Step2.2
+bs.df.set <- matrix(c(3,3,3,
+                   3,4,3,
+                   3,5,3,
+                   3,6,3,
+                   4,3,3,
+                   4,4,3,
+                   4,5,3,
+                   4,6,3,
+                   5,3,3,
+                   5,4,3,
+                   5,5,3,
+                   5,6,3,
+                   6,3,3,
+                   6,4,3,
+                   6,5,3,
+                   6,6,3,
+                   2,2,2,
+                   2,3,2,
+                   2,4,2,
+                   2,5,2,
+                   2,6,2,
+                   3,2,2,
+                   3,3,2,
+                   3,4,2,
+                   3,5,2,
+                   3,6,2,
+                   4,2,2,
+                   4,3,2,
+                   4,4,2,
+                   4,5,2,
+                   4,6,2,
+                   5,2,2,
+                   5,3,2,
+                   5,4,2,
+                   5,5,2,
+                   5,6,2,
+                   6,2,2,
+                   6,3,2,
+                   6,4,2,
+                   6,5,2,
+                   6,6,2),
+                 byrow=TRUE,ncol=3,dimnames=list(NULL,c("mu","sigma", "degree")))
+
+## WB mean SC
+dataname <- "SCdata.TD.trainset"
+smoothvar <- "age"
+IDvar <- "ID" 
+covariates <-  "sex+mean_fd"
+distribution.fam <- "BCPEo"
+randomvar <- "site"
+
+dependentvar <- "WB_SCmean"
+outlist.tmp <- gamlss_compare.bs.df(dataname, dependentvar, smoothvar, IDvar, bs.df.set, covariates, distribution.fam, randomvar, cl)
+performance.tmp <- outlist.tmp$performance
+performance_df <- performance.tmp
+model_df <- outlist.tmp[[1]]
+write.xlsx(performance_df, paste0(resultFolder, "/dftest_TD_WB_meanSC_Yeo", Yeoresolution,"_all.xlsx"))
+saveRDS(model_df, paste0(resultFolder, "/model_dftest_Yeo", Yeoresolution,"_all.rds"))
+# "The best distibution for WB_SCmean is mu.df = 2, sigma.df = 2, degree = 2.
+
+## All edges
+dataname <- "SCdata.TD.trainset"
+smoothvar <- "age"
+IDvar <- "ID" 
+covariates <-  "sex+mean_fd"
+distribution.fam <- "BCPEo"
+randomvar <- "site"
+if (! file.exists(paste0(resultFolder, "/dftest_TD_Edgelevel_Yeo", Yeoresolution,".rds"))){
+  performancelist <- list()
+  for (i in 1:element_num){
+    dependentvar <- paste0("SC.", i)
+    outlist.tmp <- gamlss_compare.bs.df(dataname, dependentvar, smoothvar, IDvar, bs.df.set, covariates, distribution.fam, randomvar, cl)
+    performance.tmp <- outlist.tmp$performance
+    performancelist[[i]] <- outlist.tmp$performance
+  }
+  saveRDS(performancelist, paste0(resultFolder, "/dftest_TD_Edgelevel_Yeo", Yeoresolution,".rds"))
+}else{
+  performancelist <- readRDS(paste0(resultFolder, "/dftest_TD_Edgelevel_Yeo", Yeoresolution,".rds"))
+}
+
+performance.df <- do.call(rbind, performancelist)
+performance.df <- performance.df %>% group_by(dependentvar) %>%
+  mutate(dfset = paste0("mu", performancelist[[1]]$mu.df, "_sigma", performancelist[[1]]$sigma.df, "_degree",  performancelist[[1]]$degree))
+performance.df <- performance.df %>% filter(converged==T) %>% group_by(dfset) %>% filter(n() == element_num)
+performance.df <- performance.df %>% group_by(dependentvar) %>%
+  mutate(rankorder = rank(BIC))
+
+performance.df.sum <- performance.df %>% group_by(dfset) %>% 
+  summarise(meanBICR = mean(rankorder), bestnum = sum(rankorder==1))
+print(paste(performance.df.sum$dfset[which.max(performance.df.sum$bestnum)], "is selected as it is the best family for most edges."))
+# "mu2_sigma2_degree2 is selected as it is the best family for most edges."
+
+# plot
+# WB_meanSC
+performance.WB <- read.xlsx(paste0(resultFolder, "/dftest_TD_WB_meanSC_Yeo", Yeoresolution,"_all.xlsx"))
+performance.tmp <- performance.WB %>% filter(converged==T)
+performance.tmp$BIC <- performance.tmp$BIC - max(performance.tmp$BIC)
+performance.tmp <- performance.tmp %>% filter(BIC < quantile(BIC, 0.25))
+performance.tmp$dfset <- paste0("mu", performance.tmp$mu.df, "_sigma", performance.tmp$sigma.df, "_degree", performance.tmp$degree)
+performance.tmp$dfset <- factor(performance.tmp$dfset, levels=performance.tmp$dfset[order(performance.tmp$BIC)])
+ggplot(data=performance.tmp)+
+  geom_bar(aes(x=dfset, y=BIC),stat="identity", fill="#B4D3E7")+
+  labs(x="Degree of freedom", y="BIC", title = "Whole brain mean SC strength")+theme_classic()+
+  theme(panel.background = element_rect(fill="white"),
+        plot.background = element_rect(fill = "white",colour = NA),aspect.ratio = 0.5,
+        plot.title = element_text(color = "black", size = 12, hjust = 0.5),
+        axis.title = element_text(color = "black", size = 12),axis.line = element_line(linewidth = 0.4),
+        axis.ticks = element_line(linewidth = 0.4),
+        axis.text.y = element_text(color = "black",size = 12),
+        axis.text.x = element_text(color = "black",angle = 45, hjust = 1, size = 14),
+        legend.position = "none")
+ggsave(paste0(FigureFolder, "/Selectparameter/dfset_WBmeanSC_all.tiff"), width=30, height=18, units = "cm")
+ggsave(paste0(FigureFolder, "/Selectparameter/dfset_WBmeanSC_all.svg"), width=30, height=18, units = "cm")
+
+# All edges
+performance.df.sum$dfset <- factor(performance.df.sum$dfset, levels = performance.df.sum$dfset[order(performance.df.sum$bestnum, decreasing = T)])
+performance.df.sum <- performance.df.sum %>% filter(dfset %in% levels(performance.df.sum$dfset)[1:10])
+
+ggplot(data=performance.df.sum)+
+  geom_bar(aes(x=dfset, y=bestnum),stat="identity", fill="#B4D3E7")+
+  labs(x="Degree of freedom", y="Frequency")+theme_classic()+
+  theme(panel.background = element_rect(fill="white"),
+        plot.background = element_rect(fill = "white",colour = NA),aspect.ratio = 0.7,
+        plot.title = element_text(color = "black", size = 14, hjust = 0.5),
+        axis.title = element_text(color = "black", size = 14),axis.line = element_line(linewidth = 0.4),
+        axis.ticks = element_line(linewidth = 0.4),
+        axis.text.y = element_text(color = "black",size = 14),
+        axis.text.x = element_text(color = "black",angle = 45, hjust = 1, size = 14),
+        legend.position = "none")
+
+ggsave(paste0(FigureFolder, "/Selectparameter/dfset_all.tiff"), width=12, height=10, units = "cm")
+ggsave(paste0(FigureFolder, "/Selectparameter/dfset_all.svg"), width=12, height=10, units = "cm")
+
+```

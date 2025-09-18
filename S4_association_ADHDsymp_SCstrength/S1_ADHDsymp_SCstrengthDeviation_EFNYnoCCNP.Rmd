@@ -1,0 +1,387 @@
+---
+title: "V1_ADHDsymp_SCstrengthDeviation"
+author: "Xiaoyu Xu"
+date: "2025-05-05"
+output: html_document
+---
+
+This script test whether deviations of SC strength assciated with normalized symptoms within ADHD?
+
+
+```{r setup, include=FALSE}
+rm(list=ls())
+library(mgcv);
+library(parallel)
+library(tidyverse)
+library(psych)
+#library(chorddiag)
+#library(circlize)
+library(RColorBrewer)
+#library(ez)
+library(tableone)
+# set resolution
+Yeoresolution <- 17
+if (Yeoresolution == 7){
+  Yeoresolution.delLM = 6
+}else if (Yeoresolution == 17){
+  Yeoresolution.delLM = 15
+}
+element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
+# input directory
+wd <- getwd()
+homepath <- str_split_i(wd, "Normative_model", 1)
+demopath <- paste0(homepath, '/Normative_model/demography')
+interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_EFNYnoCCNP')
+interfileFolder_ABCD <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
+functionFolder <- paste0(homepath, "/Normative_model/functions")
+resultFolder <- paste0(homepath, "/Normative_model/results_EFNYnoCCNP")
+resultFolder_ABCD <- paste0(homepath, "/Normative_model/results_ABCD")
+functionFolder.SCDev <- paste0(homepath, "/SC_development/Rcode_SCdevelopment/gamfunction")
+FigureFolder <- paste0(homepath, '/Normative_model/Figures_EFNYnoCCNP/Yeo', Yeoresolution,'/CV75')
+source(paste0(functionFolder.SCDev, "/gamcog.R"))
+source(paste0(functionFolder.SCDev, "/SCrankcorr.R"))
+source(paste0(functionFolder, "/plotmatrix.R"))
+source(paste0(functionFolder, "/index2network.R"))
+source(paste0(functionFolder.SCDev, "/gaminteraction.R"))
+# Load data
+SCdata.ADHD <- readRDS(paste0(interfileFolder, '/SCdata_Yeo', Yeoresolution,'_CV75.deviations_ADHD_All.rds'))
+SCdata.ADHD <- SCdata.ADHD %>% filter(visit=="0") # Only baseline
+SCdata.ADHD$sex <- as.factor(SCdata.ADHD$sex)
+SCdata.ADHD$diagnosis <- factor(SCdata.ADHD$diagnosis, levels = c("TD", "ADHD"))
+table(SCdata.ADHD$diagnosis, SCdata.ADHD$site)
+
+Behavior <- read.csv(paste0(demopath, "/basic_demo_PKU6.csv"))
+Behavior$ID <- paste0("sub-", Behavior$ID)
+SCdata.ADHD <- SCdata.ADHD %>% left_join(dplyr::select(Behavior, ID, medication, IA_B, HI_B, TO_B, IA_F, HI_F, TO_F, ICV), by="ID")
+
+summary(SCdata.ADHD[,c("IA_B", "HI_B", "TO_B", "IA_F", "HI_F", "TO_F")])
+SCdata.ADHD <- SCdata.ADHD %>% drop_na(IA_B, HI_B, TO_B) # N=412
+
+# deviation significantly change with age and overlap with findings in ABCD.
+ROIset <- read.csv(paste0(resultFolder, "/SCDeviationChange_gamresults_ADHD_ABCDoverlap.csv"))
+sigedge.all <- ROIset$parcel
+
+```
+
+## Step1 Association between SC deviation and Symptom
+
+1. Symptom ~ SC_Deviation + s(age) + sex
+
+
+```{r associate}
+dataname <- "SCdata.ADHD"
+symptomvar <- c("IA_B", "HI_B", "TO_B")
+smooth_var <- "age"
+covariates <- "sex"
+
+
+for (VOI in symptomvar){
+  if (!file.exists(paste0(interfileFolder, '/SCDeviation_', VOI,'_Age_CV75_Yeo', Yeoresolution,'_ADHDall_controlAgeSex_all.rds'))){
+    print(VOI)
+    
+    resultsum <- mclapply(1:element_num, function(x){
+      
+      region <- paste0("SC.", x, "_deviationZ")
+      gamresult<-gam.fit.cognition(region=VOI, dataname, cognition_var=region, smooth_var, covariates, knots=3, set_fx = T, stats_only = T)
+      gamresult<-as.data.frame(gamresult)
+      return(gamresult)
+    }, mc.cores = 30)
+    
+    resultsum.df <- do.call(rbind, lapply(resultsum, function(x) data.frame(x)))
+    resultsum.df[,c(3:10)]<-lapply(resultsum.df[,c(3:10)], as.numeric)
+    
+    saveRDS(resultsum.df, paste0(interfileFolder, '/SCDeviation_', VOI,'_Age_CV75_Yeo', Yeoresolution,'_ADHDall_controlAgeSex_all.rds'))
+  }
+}
+
+resultsum.df.IA <- readRDS(paste0(interfileFolder, '/SCDeviation_IA_B_Age_CV75_Yeo', Yeoresolution,'_ADHDall_controlAgeSex_all.rds'))
+resultsum.df.HI <- readRDS(paste0(interfileFolder, '/SCDeviation_HI_B_Age_CV75_Yeo', Yeoresolution,'_ADHDall_controlAgeSex_all.rds'))
+resultsum.df.TO <- readRDS(paste0(interfileFolder, '/SCDeviation_TO_B_Age_CV75_Yeo', Yeoresolution,'_ADHDall_controlAgeSex_all.rds'))
+
+# ROI edges
+resultsum.df.IA.sigedge <- resultsum.df.IA %>% filter(cognition_var %in% sigedge.all) %>% select(cognition_var, parcel, correstimate, anova.cov.pvalue)
+resultsum.df.HI.sigedge <- resultsum.df.HI %>% filter(cognition_var %in% sigedge.all) %>% select(cognition_var, parcel, correstimate, anova.cov.pvalue)
+resultsum.df.TO.sigedge <- resultsum.df.TO %>% filter(cognition_var %in% sigedge.all) %>% select(cognition_var, parcel, correstimate, anova.cov.pvalue)
+
+resultsum.df.symptom <- rbind(resultsum.df.HI.sigedge, resultsum.df.IA.sigedge, resultsum.df.TO.sigedge)
+names(resultsum.df.symptom) <- c("Parcel", "Symptom", "Corr.r", "Pvalue")
+
+for (i in 1:nrow(resultsum.df.symptom)){
+  region <- resultsum.df.symptom$Parcel[i]
+  index <- gsub("_deviationZ", "", region)
+  index <- gsub("SC.", "", index)
+  
+  networklabel <- paste0(index2network(as.numeric(index))[1], "-", index2network(as.numeric(index))[2])
+  
+  resultsum.df.symptom$Parcel[i] <- networklabel
+  
+}
+
+write.csv(resultsum.df.symptom, paste0(resultFolder, "/SCDeviation_SymptomB_ROI.csv"), row.names = F)
+
+```
+
+
+## Step2 Add PC1
+
+```{r}
+
+SCdeviation.PCA <- prcomp(SCdata.ADHD[,sigedge.all], scale. = TRUE)
+summary(SCdeviation.PCA)
+# Importance of components:
+#                           PC1    PC2     PC3     PC4     PC5     PC6     PC7     PC8     PC9   PC10
+# Standard deviation     2.1356 1.1672 0.9381 0.91188 0.78511 0.72672 0.66592 0.55398 0.52861 0.43744
+# Proportion of Variance 0.4561 0.1362 0.0880 0.08315 0.06164 0.05281 0.04434 0.03069 0.02794 0.01914
+# Cumulative Proportion  0.4561 0.5923 0.6803 0.76344 0.82508 0.87789 0.92223 0.95292 0.98086 1.00000
+
+SCdata.ADHD$SCdeviation.PC1 <- SCdeviation.PCA$x[,1]
+SCdata.ADHD <- SCdata.ADHD %>% mutate(
+  IA_delta = -(IA_F - IA_B),
+  HI_delta = -(HI_F - HI_B),
+  TO_delta = -(TO_F - TO_B)
+)
+SCdata.ADHD$medication <- gsub("AXT", "ATX", SCdata.ADHD$medication)
+
+```
+
+
+
+## Step3 Baseline SC deviation predict medication effects.
+
+1. delta_symptom = (symptom_F - symptom_B)
+2. delta_symptom ~ SC_deviation + age_B + sex
+
+```{r SCdeviation_treat}
+
+SCdata.ADHD.treated <- SCdata.ADHD %>% drop_na(IA_F, HI_F, TO_F) # N=112
+SCdata.ADHD.treated <- SCdata.ADHD.treated %>% mutate(
+  IA_delta = (IA_F - IA_B),
+  HI_delta = (HI_F - HI_B),
+  TO_delta = (TO_F - TO_B)
+)
+SCdata.ADHD.treated$medication <- gsub("AXT", "ATX", SCdata.ADHD.treated$medication)
+SCdata.ADHD.treated$medication <- as.factor(SCdata.ADHD.treated$medication)
+
+summary(SCdata.ADHD.treated[,c("age", "sex", "IA_delta", "HI_delta", "TO_delta", "medication")])
+
+write.csv(SCdata.ADHD.treated, paste0(interfileFolder, "/SCdata_deviationZ_medication_PKU6.csv"), row.names = F)
+
+t.test(TO_delta ~ medication, data=SCdata.ADHD.treated) # t=-0.2663, P=0.7906
+t.test(IA_B ~ medication, data=SCdata.ADHD.treated) # t=0.33115, P=0.7414
+t.test(HI_B ~ medication, data=SCdata.ADHD.treated) # t=1.0469, P=0.2986
+t.test(TO_B ~ medication, data=SCdata.ADHD.treated) # t=0.91306, P=0.3642
+
+SCdata.ADHD.treated.ATX <- SCdata.ADHD.treated %>% filter(medication=="ATX") # N=40
+SCdata.ADHD.treated.MPH <- SCdata.ADHD.treated %>% filter(medication=="MPH") # N=72
+
+# Define function
+MedicationEffect <- function(region, VOI, dataname, int=F){
+  
+  data.tmp <- get(dataname)
+  symptom.b <- VOI
+  #symptom.b <- gsub("_delta", "_B", VOI)
+  #symptom.b <- 1
+  
+  # tmp <- data.tmp[[region]]
+  # outlier <- which(tmp > mean(tmp)+3*sd(tmp) | tmp < mean(tmp)-3*sd(tmp))
+  # if (length(outlier) > 0){
+  #   data.tmp <- data.tmp[-outlier, ]
+  # }
+  
+  tmp <- data.tmp[[VOI]]
+  outlier <- which(tmp > mean(tmp)+3*sd(tmp) | tmp < mean(tmp)-3*sd(tmp))
+  if (length(outlier) > 0){
+    data.tmp <- data.tmp[-outlier, ]
+  }
+  
+  formula0 <- as.formula(sprintf("%s ~ age + sex + mean_fd", VOI))
+  formula1 <- as.formula(sprintf("%s ~ %s + age + sex + mean_fd", VOI, region))
+  formularegion <- as.formula(sprintf("%s ~ age + sex + mean_fd", region))
+  
+  mod0 <- lm(formula0, data = data.tmp)
+  mod1 <- lm(formula1, data = data.tmp)
+  mod1.res <- summary(mod1)
+
+  region.mod <- lm(formularegion, data = data.tmp)
+  region.resid <- residuals(region.mod)
+  VOI.resid <- residuals(mod0)
+  
+  # If SC.deviation can predict treatment effect?
+  anova.res1 <- anova(mod0, mod1, test="Chisq")
+  anova.F1 <- anova.res1$`Sum of Sq`[2]
+  anova.P1 <- anova.res1$`Pr(>Chi)`[2]
+  SC.T <- mod1.res$coefficients[2, 3]
+  SC.P <- mod1.res$coefficients[2, 4]
+  
+  shapiro_test1 <- shapiro.test(region.resid)
+  shapiro_test2 <- shapiro.test(VOI.resid)
+  
+  if (shapiro_test1$p.value > 0.05 & shapiro_test2$p.value > 0.05){
+    corrmethod <- "pearson"
+  }else{
+    corrmethod <- "spearman"
+  }
+  
+  PCorr_Test <- corr.test(region.resid, VOI.resid, method=corrmethod)
+  correstimate<-as.numeric(PCorr_Test$r)
+  corrp <- as.numeric(PCorr_Test$p)
+  
+  if (int==T){
+    formula2 <- as.formula(sprintf("%s ~ %s*medication + age + sex+ mean_fd", VOI, region))
+    mod2 <- lm(formula2, data = data.tmp)
+    anova.res2 <- anova(mod1, mod2, test="Chisq")
+    anova.F2 <- anova.res2$`Sum of Sq`[2]
+    anova.P2 <- anova.res2$`Pr(>Chi)`[2]
+    mod2.res <- summary(mod2)
+    SCmedication.T <- mod2.res$coefficients[nrow(mod2.res$coefficients), 3]
+    SCmedication.P <- mod2.res$coefficients[nrow(mod2.res$coefficients), 4]
+  }
+  
+  if (int==T){
+      result <- data.frame(symptom=VOI, region=region, anova.F1, anova.P1, SC.T, SC.P,correstimate, corrp, corrmethod, anova.F2, anova.P2, SCmedication.T, SCmedication.P)
+  }else{
+      result <- data.frame(symptom=VOI, region=region, anova.F1, anova.P1, SC.T, SC.P,correstimate, corrp, corrmethod)
+  }
+  
+  
+  return(result)
+}
+
+n=0; Treat.df.ATX <- Treat.df.MPH <- list(); Treat.df <- list()
+for (VOI in c("IA_delta", "HI_delta")){
+  for (i in 1:length(c(sigedge.all, "SCdeviation.PC1"))){
+    region <- c(sigedge.all, "SCdeviation.PC1")[i]
+    n <- n+1
+    Treat.df.ATX[[n]] <- MedicationEffect(region, VOI, dataname="SCdata.ADHD.treated.ATX")
+    Treat.df.MPH[[n]] <- MedicationEffect(region, VOI, dataname="SCdata.ADHD.treated.MPH")
+    Treat.df[[n]] <- MedicationEffect(region, VOI, dataname="SCdata.ADHD.treated", int=T)
+  }
+}
+
+Treat.df.ATX <- do.call(rbind, Treat.df.ATX)
+Treat.df.MPH <- do.call(rbind, Treat.df.MPH)
+Treat.df <- do.call(rbind, Treat.df)
+
+Treat.df.ATX <- Treat.df.ATX %>% filter(region != "SCdeviation.PC1")
+Treat.df.MPH <- Treat.df.MPH %>% filter(region != "SCdeviation.PC1")
+Treat.df <- Treat.df %>% filter(region != "SCdeviation.PC1")
+
+Treat.df.ATX$anova.P1.fdr <- p.adjust(Treat.df.ATX$anova.P1, method = "fdr")
+Treat.df.MPH$anova.P1.fdr <- p.adjust(Treat.df.MPH$anova.P1, method = "fdr")
+Treat.df$anova.P1.fdr <- p.adjust(Treat.df$anova.P1, method = "fdr")
+
+Treat.df.ATX$corrp.fdr <- p.adjust(Treat.df.ATX$corrp, method = "fdr")
+Treat.df.MPH$corrp.fdr <- p.adjust(Treat.df.MPH$corrp, method = "fdr")
+Treat.df$corrp.fdr <- p.adjust(Treat.df$corrp, method = "fdr")
+
+write.csv(Treat.df.ATX, paste0(resultFolder, "/MedicationATX_SCdeviation_agelinear.csv"), row.names = F)
+write.csv(Treat.df.MPH, paste0(resultFolder, "/MedicationMPH_SCdeviation_agelinear.csv"), row.names = F)
+write.csv(Treat.df, paste0(resultFolder, "/MedicationALL_SCdeviation_agelinear.csv"), row.names = F)
+
+# significant SC-Symptom pair
+plotpair <- rbind(Treat.df.ATX[Treat.df.ATX$anova.P1<0.1,], Treat.df.MPH[Treat.df.MPH$anova.P1<0.1,])
+
+## plot
+for (i in 1:nrow(plotpair)){
+  
+  VOI <- plotpair$symptom[i]
+  region <- plotpair$region[i]
+  
+  if (VOI == "IA_delta"){
+    ytitle <- "\u0394Inattention symptom"
+  }else{
+    ytitle <- "\u0394Hyperactivity symptom"
+  }
+  
+  formula0 <- as.formula(sprintf("%s ~ age + sex + mean_fd", VOI))
+  formularegion <- as.formula(sprintf("%s ~ age + sex + mean_fd", region))
+  
+  mod.symptom.MPH <- lm(formula0, data = SCdata.ADHD.treated.MPH)
+  df.MPH <- SCdata.ADHD.treated.MPH %>% mutate(age = mean(age), sex="M", mean_fd=mean(mean_fd))
+  mod.symptom.MPH.res <- residuals(mod.symptom.MPH) + predict(mod.symptom.MPH, newdata = df.MPH)
+  
+  mod.symptom.ATX <- lm(formula0, data = SCdata.ADHD.treated.ATX)
+  df.ATX <- SCdata.ADHD.treated.ATX %>% mutate(age = mean(age), sex="M", mean_fd=mean(mean_fd))
+  mod.symptom.ATX.res <- residuals(mod.symptom.ATX) + predict(mod.symptom.ATX, newdata = df.ATX)
+  
+  mod.region.MPH <- lm(formularegion, data = SCdata.ADHD.treated.MPH)
+  df.MPH <- SCdata.ADHD.treated.MPH %>% mutate(age = mean(age), sex="M", mean_fd=mean(mean_fd))
+  mod.region.MPH.res <- residuals(mod.region.MPH) + predict(mod.region.MPH, newdata = df.MPH)
+  
+  mod.region.ATX <- lm(formularegion, data = SCdata.ADHD.treated.ATX)
+  df.ATX <- SCdata.ADHD.treated.ATX %>% mutate(age = mean(age), sex="M", mean_fd=mean(mean_fd))
+  mod.region.ATX.res <- residuals(mod.region.ATX) + predict(mod.region.ATX, newdata = df.ATX)
+  
+  corr.test(mod.symptom.ATX.res, mod.region.ATX.res) # r = -0.5
+  corr.test(mod.symptom.MPH.res, mod.region.MPH.res) # r = 0.09
+  
+  if (region != "SCdeviation.PC1"){
+    index <- gsub("SC.", "", region)
+    index <- gsub("_deviationZ", "", index)
+    networklabel = index2network(as.numeric(index))
+    networklabel <- paste0(networklabel[1], "-", networklabel[2])
+  }else{
+    networklabel <- ""
+  }
+  
+  
+  dfplot <- data.frame(symptom.res = c(mod.symptom.MPH.res, mod.symptom.ATX.res), region.res = c(mod.region.MPH.res, mod.region.ATX.res), medication = c(SCdata.ADHD.treated.MPH$medication, SCdata.ADHD.treated.ATX$medication))
+  
+  ggplot(data = dfplot)+
+    geom_smooth(aes(x = region.res, y=symptom.res, color=medication, fill=medication), method="lm", alpha=0.3)+
+    geom_point(aes(x = region.res, y=symptom.res, color=medication))+
+    scale_color_manual(values = c("#B2182B", "#1A1A1A"), labels = c("ATX", "MPH"))+
+    scale_fill_manual(values = c("#F4A582", "#BABABA"), labels = c("ATX", "MPH"))+
+    labs(x="Pre-medication SC deviation", y=ytitle, color="Medication", fill="Medication")+
+    theme_classic()+
+    theme(axis.text=element_text(size=18, color="black"),
+          axis.title =element_text(size=18, color="black"),
+          aspect.ratio = 0.9,
+          plot.tag =element_text(size=18, hjust=10, vjust=-5, color="black"),
+          plot.subtitle = element_text(size=18, hjust=0.1, vjust=-10, color="black"),
+          plot.title = element_text(size=18, hjust=0.1, vjust=-9, color="black"),
+          plot.background=element_rect(fill="transparent"),
+          panel.background=element_rect(fill="transparent"),
+          legend.text = element_text(size=18, color="black"),
+          legend.title = element_text(size=18, color="black"))
+  
+  ggsave(paste0(FigureFolder, "/SCDeviation_MedicationSymptom/Scatter/", region, "_", VOI,".tiff"), width = 18, height=15, units = "cm")
+}
+
+
+## Symptom reduction for 2 medications
+SCdata.ADHD.treated.long <- SCdata.ADHD.treated %>% pivot_longer(cols=ends_with("_delta"), names_to = "Symptom", values_to = "Symptom_delta") %>% filter(Symptom != "TO_delta")
+
+SymptomSum <- SCdata.ADHD.treated.long %>% group_by(medication, Symptom) %>%
+  summarise(mean = mean(Symptom_delta), sd = sd(Symptom_delta), .groups = "drop")
+
+t.test(IA_delta ~ medication, data=SCdata.ADHD.treated) # t=-0.50413, df =93.429, p=0.6154
+t.test(HI_delta ~ medication, data=SCdata.ADHD.treated) # t=0.065537, df =84.143, p=0.9479
+
+ggplot()+
+  geom_bar(data = SymptomSum, aes(x = Symptom, y=mean, fill=medication), color="black", stat = "identity", position = position_dodge(width = 0.7), width = 0.6, linewidth=1, alpha=0.5)+
+  geom_errorbar(data = SymptomSum, aes(x = Symptom, ymin=mean-sd, ymax=mean+sd, group=medication), color="black", position = position_dodge(width = 0.7), width = 0.2, linewidth=1)+
+  geom_jitter(data=SCdata.ADHD.treated.long, aes(x=Symptom, y=Symptom_delta, color=medication), position = position_jitterdodge(jitter.width = 0.2, jitter.height = 0, dodge.width = 0.7), size=2, alpha=0.5)+
+  geom_hline(yintercept = 0, color = "black", linewidth = 0.5) +
+  scale_color_manual(values = c("#B2182B", "#1A1A1A"), labels = c("ATX", "MPH"))+
+  scale_fill_manual(values = c("#F4A582", "#BABABA"), labels = c("ATX", "MPH"))+
+  scale_x_discrete(labels = c("Hyperactivity", "Inattention"))+
+  labs(x = NULL, y = "\u0394Symptom (Mean ± SD)")+
+  theme_classic()+
+  theme(axis.text.y=element_text(size=18, color="black"),
+        axis.text.x=element_text(size=18, color="black"),
+        axis.title =element_text(size=18, color="black"),
+        axis.line.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        aspect.ratio = 1.2,
+        plot.subtitle = element_text(size=20.5, hjust=0.1, vjust=-6, color="black"),
+        plot.background=element_rect(fill="transparent"),
+        panel.background=element_rect(fill="transparent"),
+        legend.text = element_text(size=15, color="black"),
+        legend.title = element_text(size=15, color="black"))
+
+ggsave(paste0(FigureFolder, "/SCDeviation_MedicationSymptom/SymptomReduction_Medication.tiff"), width = 16, height=15, units = "cm")
+
+```
+
+
