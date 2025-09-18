@@ -280,7 +280,7 @@ if (str_detect(wdpath, "cuizaixu_lab")){
 SCdata.tmp <- as.numeric(SCdata.sum75.merge[12, paste0("SC.", 1:elementnum)])
 df <- data.frame(SCstrength=SCdata.tmp)
 
-PaletteSet <- list(Name="Blues", drirection=1, lmmin = min(SCdata.tmp), lmmax = max(SCdata.tmp), 
+PaletteSet <- list(Name="Blues", direction=1, lmmin = min(SCdata.tmp), lmmax = max(SCdata.tmp), 
                    anglex=45, angley=45,hjustx = 1, hjusty = 1, vjustx = 1, vjusty=0.3)
 
 SCmatPlot <- plotmatrix(dataname="df", variable="SCstrength", 
