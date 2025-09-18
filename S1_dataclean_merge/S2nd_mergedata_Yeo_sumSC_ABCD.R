@@ -10,7 +10,7 @@ library(reshape)
 library(psych)
 rm(list = ls())
 wdpath <- getwd()
-homepath <- str_split_i(wdpath, "Normative_model", 1)
+homepath <- "/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation"
 # input Yeo resolution of 7 or 17.
 Yeoresolution <- 17
 if (Yeoresolution == 7){
@@ -22,11 +22,11 @@ elementnum <- Yeoresolution.delLM*(Yeoresolution.delLM+1) /2
 
 SC_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/qsiPrep/SC_matrix'
 Volume_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/schaefer400_7_nodevolume'
-demopath <- paste0(homepath, '/Normative_model/demography')
-interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
-functionFolder <- paste0(homepath, "/Normative_model/functions")
-resultFolder <- paste0(homepath, "/Normative_model/results_ABCD")
-FigureFolder <- paste0(homepath, "/Normative_model/Figures_ABCD")
+demopath <- file.path(homepath, "data", 'demography')
+interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
+functionFolder <- file.path(homepath, "functions")
+resultFolder <- file.path(homepath, "data", "reports", "results", "ABCD")
+FigureFolder <- file.path(homepath, "data", "reports", "figures", "ABCD")
 
 Behavior <- read.csv(paste0(demopath, '/demo_sublist7.csv'))
 Behavior <- Behavior %>% distinct(scanID, .keep_all = TRUE)

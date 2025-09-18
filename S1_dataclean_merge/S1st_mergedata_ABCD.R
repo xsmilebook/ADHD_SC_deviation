@@ -15,11 +15,11 @@ wd <- getwd()
 homepath <- "/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation"
 SC_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/qsiPrep/SC_matrix'
 Volume_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/schaefer400_7_nodevolume'
-demopath <- file.path(homepath, 'demography')
-interfileFolder <- file.path(homepath, 'interfileFolder', "ABCD")
+demopath <- file.path(homepath, "data", 'demography')
+interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
 functionFolder <- file.path(homepath, "functions")
-resultFolder <- file.path(homepath, "results", "ABCD")
-FigureFolder <- file.path(homepath, "reports", "figures", "ABCD")
+resultFolder <- file.path(homepath, "data", "reports", "results", "ABCD")
+FigureFolder <- file.path(homepath, "data", "reports", "figures", "ABCD")
 
 Behavior <- read.csv(paste0(demopath, '/demo_sublist7.csv'))
 
@@ -116,7 +116,7 @@ meanSC<-colMeans(SCdata.sum.merge[,2:70877])
 meanSC25<-colMeans(SCdata.sum.merge.CV25[,2:70877])
 #376
 Matsize<-376
-Matrix.376 <- matrix(NA, nrow=Matsize, ncol =Matsize)
+Matrix.376 <- matrix(NA, nrow = Matsize, ncol = Matsize)
 indexup <- upper.tri(Matrix.376)
 indexsave <- !indexup ###keep lower triangle and diagonal
 index <- as.numeric(meanSC)
