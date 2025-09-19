@@ -24,9 +24,9 @@ SC_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/qsiPrep/SC_matrix'
 Volume_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/schaefer400_7_nodevolume'
 demopath <- file.path(homepath, "data", 'demography')
 interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
-functionFolder <- file.path(homepath, "functions")
-resultFolder <- file.path(homepath, "data", "reports", "results", "ABCD")
-FigureFolder <- file.path(homepath, "data", "reports", "figures", "ABCD")
+functionFolder <- file.path(homepath, "src", "functions")
+resultFolder <- file.path(homepath, "reports", "results", "ABCD")
+FigureFolder <- file.path(homepath, "reports", "figures", "ABCD")
 
 Behavior <- read.csv(paste0(demopath, '/demo_sublist7.csv'))
 Behavior <- Behavior %>% distinct(scanID, .keep_all = TRUE)
@@ -122,7 +122,7 @@ for (i in 1:elementnum){
   colname[i] <- paste0('SC.', as.character(i))
 }
 
-if (str_detect(wdpath, "cuizaixu_lab")){
+if (!str_detect(wdpath, "cuizaixu_lab")){
   SCdata.sum <- mclapply(1:nrow(Behavior), function(i){
     scanID <- Behavior$scanID[i]
     siteID <- Behavior$siteID[i]
@@ -287,10 +287,10 @@ SCmatPlot <- plotmatrix(dataname="df", variable="SCstrength",
                           ds.resolution=Yeoresolution.delLM, Pvar=NA, NAcol="white", 
                         lmthr=NA, axeslabels=NULL, axeslabelsGap=F, 
                         linerange_frame=NA, PaletteSet=PaletteSet, Pvar.noFDR=NA)
-SCmatPlot
-
-ggsave(paste0(FigureFolder,"/CV75/Matrix_Yeo",Yeoresolution, "_sumSCinvnode_Age8_22/Random_SCmat.tiff"), 
-       SCmatPlot, height = 14, width = 16, units = "cm")
+# SCmatPlot
+fig_path <- paste0(FigureFolder, "/CV75/Matrix_Yeo",Yeoresolution, "_sumSCinvnode_Age8_22/Random_SCmat.tiff")
+dir.create(dirname(fig_path), recursive=TRUE)
+ggsave(fig_path, SCmatPlot, height = 14, width = 16, units = "cm")
 
 
 
