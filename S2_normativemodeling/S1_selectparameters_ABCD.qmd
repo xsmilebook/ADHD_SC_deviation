@@ -48,13 +48,15 @@ element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
 
 # input directory
 wd <- getwd()
-homepath <- str_split_i(wd, "Normative_model", 1)
-demopath <- paste0(homepath, '/Normative_model/demography')
-interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
-functionFolder <- paste0(homepath, "/Normative_model/functions")
-resultFolder <- paste0(homepath, "/Normative_model/results_ABCD")
-functionFolder.SCDev <- paste0(homepath, "/SC_development/Rcode_SCdevelopment/gamfunction")
-FigureFolder <- paste0(homepath, '/Normative_model/Figures_ABCD/Yeo', Yeoresolution,'/CV75')
+homepath <- "D:/code/ADHD_SC_deviation"
+demopath <- file.path(homepath, "data", 'demography')
+interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
+functionFolder <- file.path(homepath, "src", "functions")
+resultFolder <- file.path(homepath, "reports", "results", "ABCD")
+functionFolder.SCDev <- file.path(homepath, "src", "gamfunction")
+FigureFolder <- paste0(homepath, '/reports/figures/ABCD/Yeo', Yeoresolution,'/CV75')
+
+
 
 # load data
 SCdata <- readRDS(paste0(interfileFolder, '/SCdata_Yeo',Yeoresolution, '_CV75_sumSCinvnode.sum.msmtcsd.merge.rds'))
@@ -355,8 +357,11 @@ if (! file.exists(paste0(resultFolder, "/dftest_TD_Edgelevel_Yeo", Yeoresolution
 }
 
 performance.df <- do.call(rbind, performancelist)
+# maybe a mistake
 performance.df <- performance.df %>% group_by(dependentvar) %>%
   mutate(dfset = paste0("mu", performancelist[[1]]$mu.df, "_sigma", performancelist[[1]]$sigma.df, "_degree",  performancelist[[1]]$degree))
+# performance.df <- performance.df %>%
+#   mutate(dfset = paste0("mu", mu.df, "_sigma", sigma.df, "_degree", degree))
 performance.df <- performance.df %>% filter(converged==T) %>% group_by(dfset) %>% filter(n() == element_num)
 performance.df <- performance.df %>% group_by(dependentvar) %>%
   mutate(rankorder = rank(BIC))
