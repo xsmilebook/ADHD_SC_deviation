@@ -17,7 +17,7 @@ SC_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/qsiPrep/SC_matrix'
 Volume_path <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/processed/schaefer400_7_nodevolume'
 demopath <- file.path(homepath, "data", 'demography')
 interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
-functionFolder <- file.path(homepath, "functions")
+functionFolder <- file.path(homepath, "src", "functions")
 resultFolder <- file.path(homepath, "reports", "results", "ABCD")
 FigureFolder <- file.path(homepath, "reports", "figures", "ABCD")
 
