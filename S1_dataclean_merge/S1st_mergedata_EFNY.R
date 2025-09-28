@@ -13,8 +13,7 @@ rm(list = ls())
 # Set atlas
 Yeoresolution <- 17
 # Set path and load data
-wd <- getwd()
-homepath <- str_split_i(wd, "Normative_model", 1)
+homepath <- "/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation"
 SC_path_EFNY <-'/ibmgpfs/cuizaixu_lab/congjing/brainproject/development/results/defaultatlas'
 SC_path_PKU6 <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/PKU6/SCmat'
 SC_path_CCNP <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/CCNP/processed/SC'
@@ -22,11 +21,11 @@ Volume_path_EFNY <-'/ibmgpfs/cuizaixu_lab/congjing/brainproject/development/resu
 Volume_path_PKU6 <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/PKU6/schaefer400_nodevolume'
 Volume_path_CCNP <- '/ibmgpfs/cuizaixu_lab/xuxiaoyu/CCNP/processed/schaefer400_nodevolume'
 
-demopath <- paste0(homepath, '/Normative_model/demography')
-interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_EFNYnoCCNP')
-functionFolder <- paste0(homepath, "/Normative_model/functions")
-resultFolder <- paste0(homepath, "/Normative_model/results_EFNYnoCCNP")
-FigureFolder <- paste0(homepath, "/Normative_model/Figures_EFNYnoCCNP")
+demopath <- file.path(homepath, "data", "demography")
+interfileFolder <- file.path(homepath, "data", 'interfileFolder', "EFNY")
+functionFolder <- file.path(homepath, "src", "functions")
+resultFolder <- file.path(homepath, "reports", "results", "EFNY")
+FigureFolder <- file.path(homepath, "reports", "figures", "EFNY")
 
 Behavior <- read.csv(paste0(demopath, '/ALL_SITES_basic_demo.csv'))
 Behavior <- Behavior %>% filter(age >= 6.5, age <= 15.5) # N=785

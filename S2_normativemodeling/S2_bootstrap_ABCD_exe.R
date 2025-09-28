@@ -11,7 +11,7 @@ if (Yeoresolution == 7){
 element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
 
 # input directory
-homepath <- "D:/code/ADHD_SC_deviation"
+homepath <- "/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation"
 demopath <- file.path(homepath, "data", "demography")
 interfileFolder <- file.path(homepath, "data", "interfileFolder", "ABCD")
 functionFolder <- file.path(homepath, "src", "functions")
@@ -27,7 +27,7 @@ source(file.path(homepath, "src", "S2_normativemodeling", "S2_bootstrap_ABCD.R")
 n <- commandArgs(trailingOnly = TRUE)
 n <- as.numeric(n)
 
-for (i in 1:element_num){
+for (i in 9:element_num){
   SClabel <- paste0("SC.", i)
   SCdata.sum75.merge.TD <- SCdataTD %>% select(all_of(c(SClabel, "age", "sex", "meanFD", "siteID", "scanID")))
   SCdata.sum75.merge.TD$sex <- factor(SCdata.sum75.merge.TD$sex, levels=c(1,2), labels=c("M", "F"))
