@@ -13,8 +13,7 @@ library(openxlsx)
 library(rjson)
 library(readxl)
 library(stringr)
-result_path <- "D:/xuxiaoyu/open_dataset_information/PKU6"
-demo_path <- "D:/xuxiaoyu/open_dataset_information/PKU6/demography"
+demo_path <- "D:/code/ADHD_SC_deviation/data/demography/PKU6"
 qcpath <- "D:/xuxiaoyu/open_dataset_information/PKU6/qc_json"
 
 file_path <- paste0(demo_path, "/20250421_ADHD_NC_demo_adhdrs_cantab_forCIBR.xlsx")

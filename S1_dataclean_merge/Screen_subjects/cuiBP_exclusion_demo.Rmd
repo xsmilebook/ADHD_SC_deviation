@@ -14,14 +14,14 @@ library(openxlsx)
 library(rjson)
 library(dplyr)
 library(readxl)
-homepath <- "D:/xuxiaoyu/project_files/BP_youth_data"
-result_path <- file.path(homepath, "demography")
-demo_path <- file.path(homepath, "behavior")
-qcpath <- file.path(homepath, "qc")
+homepath <- "D:/code/ADHD_SC_deviation"
+result_path <- file.path(homepath, "data", "demography")
+demo_path <- file.path(homepath, "data", "behavior")
+qcpath <- file.path(homepath, "data", "qc")
 
-basic_demo <- read.xlsx(paste0(demo_path, "/basic_demography20250418.xlsx"), detectDates=T)
+basic_demo <- read.xlsx(file.path(demo_path, "basic_demography20250418.xlsx"), detectDates=T)
 basic_demo$age <- as.numeric(difftime(basic_demo$Visitday, basic_demo$Birthday, units = "days") / 365)
-basic_demo2 <- read.xlsx(paste0(demo_path, "/basic_demography20241102.xlsx"), detectDates=T)
+basic_demo2 <- read.xlsx(file.path(demo_path, "basic_demography20241102.xlsx"), detectDates=T)
 basic_demo2$age <- as.numeric(difftime(basic_demo2$Visitday, basic_demo2$Birthday, units = "days") / 365)
 basic_demo2 <- basic_demo2 %>% filter(! ID %in% basic_demo$ID)
 basic_demo2$Hear_problems <- gsub(0, 2, basic_demo2$Hear_problems)
@@ -34,15 +34,15 @@ basic_demo.df <- rbind(basic_demo[,vars], basic_demo2[,vars])
 # MRI table
 MRItable <- read.csv(paste0(demo_path, "/MRItable20250418.csv"))
 names(MRItable) <- c("ID", "Name", "familyID", "Visitday", "subID", "Height", "Weight", "Birthday", "Age", "Sex", "SarttimeS1", "EndtimeS1", "SarttimeS2", "EndtimeS2", "MRIcompleteness", "MRIrawdataCheck", "MRINote", "MRItester", "Video", "TaskLoop1", "Appcompleteness", "APPtester", "Othernote", "Blank", "DataCompleteness", "DataQC", "DataBackup", "Blank2", "QCcompleteness")
-MRItable <- MRItable[,-c(30:42)]
+# MRItable <- MRItable[,-c(30:42)]
 MRItable <- MRItable %>% drop_na(familyID)
 MRIdatatab <- read.csv(paste0(demo_path, "/brainproject_subinfo.csv"))
 
 # demography (Cong Jing checked)
-basic_demoCJ <- read.xlsx(paste0(demo_path, "/demography_CJ.xlsx"), detectDates=T)
-names(basic_demoCJ) <- c("subID", "Sex", "age")
-basic_demoCJ$ID <- substr(basic_demoCJ$subID, 16, 18)
-basic_demoCJ <- basic_demoCJ %>% left_join(select(MRItable, ID, Name), by="ID")
+# basic_demoCJ <- read.xlsx(paste0(demo_path, "/demography_CJ.xlsx"), detectDates=T)
+# names(basic_demoCJ) <- c("subID", "Sex", "age")
+# basic_demoCJ$ID <- substr(basic_demoCJ$subID, 16, 18)
+# basic_demoCJ <- basic_demoCJ %>% left_join(select(MRItable, ID, Name), by="ID")
 
 # Not in the TD table
 basic_demo.df.other <- basic_demo.df %>% filter(! basic_demo.df$ID %in% basic_demoCJ$ID)
