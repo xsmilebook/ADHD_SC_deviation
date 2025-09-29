@@ -18,7 +18,7 @@ execute_boot <- function(n, var){
   
   # input directory
   wd <- getwd()
-  homepath <- "D:/code/ADHD_SC_deviation"
+  homepath <- "/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation"
   demopath <- file.path(homepath, "data", 'demography')
   interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
   functionFolder <- file.path(homepath, "src", "functions")
@@ -35,7 +35,7 @@ execute_boot <- function(n, var){
   mu.df <- sigma.df <- degree <- 2
   mod.mu.formula <- as.formula(sprintf("%s ~ bs(%s, df = %s, degree = %s) + %s + random(as.factor(%s))", var, "age", 
                                        mu.df, degree, "sex+meanFD", "siteID"))
-  con<-gamlss.control(n.cyc=200)
+  con<-gamlss.control(n.cyc=200, trace = TRUE)
   SCdata.sum75.merge.TD <- SCdataTD %>% select(all_of(c(var, "age", "sex", "meanFD", "siteID", "scanID")))
   model.var <- gamlss(mod.mu.formula, sigma.formula =~ bs(age, df = 2, degree =2)+sex+meanFD, nu.formula = ~1, family=GG, 
                             data=SCdata.sum75.merge.TD, control=con)

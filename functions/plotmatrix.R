@@ -112,7 +112,7 @@ plotmatrix <- function(dataname, variable, ds.resolution, Pvar=NA, NAcol="white"
   
   
   if (length(PaletteSet) == 1){
-    PaletteSet <- list(Name="RdBu", drirection=-1, lmmin = -lmthr, lmmax = lmthr, 
+    PaletteSet <- list(Name="RdBu", direction=-1, lmmin = -lmthr, lmmax = lmthr, 
                        anglex=90, angley=0, hjustx=1, vjustx=0.5, hjusty=1, vjusty=0.5)
   }else if (is.null(PaletteSet$anglex)){
     PaletteSet$anglex = 90
@@ -123,8 +123,8 @@ plotmatrix <- function(dataname, variable, ds.resolution, Pvar=NA, NAcol="white"
   
   Fig <- ggplot(data=matrixtmp.df.melt)+
     geom_tile(aes(x=variable, y=nodeid, fill=value, color=value))+
-    scale_fill_distiller(type="seq", palette = PaletteSet$Name, limit=c(PaletteSet$lmmin, PaletteSet$lmmax),direction=PaletteSet$drirection, na.value = NAcol)+
-    scale_color_distiller(type="seq", palette = PaletteSet$Name,limit=c(PaletteSet$lmmin, PaletteSet$lmmax),direction=PaletteSet$drirection, na.value = NAcol)+
+    scale_fill_distiller(type="seq", palette = PaletteSet$Name, limit=c(PaletteSet$lmmin, PaletteSet$lmmax),direction=PaletteSet$direction, na.value = NAcol)+
+    scale_color_distiller(type="seq", palette = PaletteSet$Name,limit=c(PaletteSet$lmmin, PaletteSet$lmmax),direction=PaletteSet$direction, na.value = NAcol)+
     #geom_text(data =matrixtmp.df.sig_noFDR.melt, aes(x=variable, y=nodeid, label = "+"), color=textcolor2, vjust = 0.5, hjust = 0.5, size=8)+
     geom_tile(data =matrixtmp.df.sig_noFDR.melt, aes(x=variable, y=nodeid), color=textcolor2, linewidth=1, fill="transparent")+
     geom_text(data =matrixtmp.df.sig.melt, aes(x=variable, y=nodeid, label = "*"), color=textcolor, vjust = 0.8, hjust = 0.5, size=10)+
