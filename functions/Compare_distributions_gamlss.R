@@ -210,7 +210,7 @@ gamlss_compare.bs.df <- function(dataname, dependentvar, smoothvar, IDvar, bs.df
 }
 
 
-Boot.Function <- function( n, Base.Seed, dataname,smoothvar,randomvar, model_obj, stratify=NULL ) {
+Boot.Function <- function(n, Base.Seed, dataname, smoothvar,randomvar, model_obj, stratify=NULL ) {
   # extract variables
   mod.mu.formula <- model_obj$mu.formula
   formula.vars <- as.character(mod.mu.formula)

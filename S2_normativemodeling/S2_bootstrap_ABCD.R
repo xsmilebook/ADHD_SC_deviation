@@ -17,7 +17,6 @@ execute_boot <- function(n, var){
   element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
   
   # input directory
-  wd <- getwd()
   homepath <- "/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation"
   demopath <- file.path(homepath, "data", 'demography')
   interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
@@ -54,7 +53,7 @@ execute_boot <- function(n, var){
   stratify <- c("sex", "siteID")
   randomvar <- "siteID"
   
-  bootstrap.out <- Boot.Function(n, Base.Seed, dataname,smoothvar,randomvar , model_obj, stratify)
+  bootstrap.out <- Boot.Function(n, Base.Seed, dataname, smoothvar,randomvar , model_obj, stratify)
   mod.tmp <- bootstrap.out$mod.tmp
   gam.data.subset <- bootstrap.out$gam.data.subset
   gam.data.subset <- as.data.frame(gam.data.subset)
