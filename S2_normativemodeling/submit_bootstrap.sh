@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TOTAL_JOBS=1
+TOTAL_JOBS=1200
 
 SBATCH_DIR="/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation/data/bootstrap_code"
 mkdir -p $SBATCH_DIR
