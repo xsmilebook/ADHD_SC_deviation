@@ -29,14 +29,13 @@ if (Yeoresolution == 7){
 element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
 
 # input directory
-wd <- getwd()
-homepath <- str_split_i(wd, "Normative_model", 1)
-demopath <- paste0(homepath, '/Normative_model/demography')
-interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
-functionFolder <- paste0(homepath, "/Normative_model/functions")
-resultFolder <- paste0(homepath, "/Normative_model/results_ABCD")
-functionFolder.SCDev <- paste0(homepath, "/SC_development/Rcode_SCdevelopment/gamfunction")
-FigureFolder <- paste0(homepath, '/Normative_model/Figures_ABCD/Yeo', Yeoresolution,'/CV75')
+homepath <- "D:/code/ADHD_SC_deviation"
+demopath <- file.path(homepath, "data", 'demography')
+interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
+functionFolder <- file.path(homepath, "src", "functions")
+resultFolder <- file.path(homepath, "reports", "results", "ABCD")
+functionFolder.SCDev <- file.path(homepath, "src", "gamfunction")
+FigureFolder <- paste0(homepath, '/reports/figures/ABCD/Yeo', Yeoresolution,'/CV75')
 
 # load data
 SCdata.sum75.merge <- readRDS(paste0(interfileFolder, '/SCdata_Yeo',Yeoresolution, '_CV75_sumSCinvnode.sum.msmtcsd.merge.rds'))
@@ -69,7 +68,7 @@ IDvar <- "scanID"
 quantile.vec <- c(0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99)
 stratify <- c("sex", "siteID")
 dependentvar <- "WB_SCmean"
-sumlist <- construct_gamlss(dataname, dependentvar, smoothterm, covariates,randomvar, mu.df, sigma.df,degree, distribution.fam,IDvar, quantile.vec, stratify)
+sumlist <- construct_gamlss(dataname, dependentvar, smoothterm, covariates,randomvar, mu.df, sigma.df,degree, distribution.fam, IDvar, quantile.vec, stratify)
 model.WBmeanSC <- sumlist$mod.tmp
 summary(model.WBmeanSC)
 
