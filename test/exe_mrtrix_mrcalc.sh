@@ -28,7 +28,7 @@ done
 
 # Step 3: Merge using -max (logical OR)
 dos2unix /ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/batch_code/SIEMENS/dMRI/schaefer376_index_Yeo17.csv
-for i in `cat ...`; do
+for i in `cat /ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/batch_code/SIEMENS/dMRI/schaefer376_index_Yeo17.csv`; do
     index=$(echo $i | awk -F "," '{print $2}')
     name=$(echo $i | awk -F "," '{print $16}')
     for j in $(seq 1 15); do
