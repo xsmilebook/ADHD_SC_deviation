@@ -34,23 +34,32 @@ for i in `cat /ibmgpfs/cuizaixu_lab/xuxiaoyu/ABCD/batch_code/SIEMENS/dMRI/schaef
     for j in $(seq 1 15); do
         if [ "$name" -eq $j ]; then
             echo "Schaefer${index} network${name}"
+            tmp_out=$(mktemp --suffix=.nii.gz)
             mrcalc ${result_path}/Yeo17_sep/Yeo17_${j}.nii.gz \
                    ${result_path}/schaefer376/schaeferDelLM_${index}.nii.gz \
-                   -max \
-                   ${result_path}/Yeo17_sep/Yeo17_${j}.nii.gz
+                   -max $tmp_out -force
+            mv $tmp_out ${result_path}/Yeo17_sep/Yeo17_${j}.nii.gz
         fi
     done
 done
 
 # Step 4: Combine into label map
+cp ${result_path}/Yeo17_sep/Yeo17_1.nii.gz ${result_path}/Yeo17_sep/merged.nii.gz
+
 for j in $(seq 2 15)
 do
-    mrcalc ${result_path}/Yeo17_sep/Yeo17_${j}.nii.gz $j -mult ${result_path}/Yeo17_sep/Yeo17_${j}.nii.gz
-    mrcalc ${result_path}/Yeo17_sep/Yeo17_1.nii.gz \
-           ${result_path}/Yeo17_sep/Yeo17_${j}.nii.gz \
-           -add \
-           ${result_path}/Yeo17_sep/Yeo17_1.nii.gz
+    # 将 Yeo_j 赋标签值 j
+    tmp_label=$(mktemp --suffix=.nii.gz)
+    mrcalc ${result_path}/Yeo17_sep/Yeo17_${j}.nii.gz $j -mult $tmp_label -force
+
+    # 累加到 merged
+    tmp_merged=$(mktemp --suffix=.nii.gz)
+    mrcalc ${result_path}/Yeo17_sep/merged.nii.gz $tmp_label -add $tmp_merged -force
+    mv $tmp_merged ${result_path}/Yeo17_sep/merged.nii.gz
+
+    # 清理临时文件
+    rm -f $tmp_label
 done
 
-# Final output (already .nii.gz)
-cp ${result_path}/Yeo17_sep/Yeo17_1.nii.gz ${result_path}/Yeo17_schaefer376_merge.nii.gz
+# 最终结果
+cp ${result_path}/Yeo17_sep/merged.nii.gz ${result_path}/Yeo17_schaefer376_merge.nii.gz
