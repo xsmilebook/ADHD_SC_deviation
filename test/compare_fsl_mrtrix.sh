@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # 比较 FSL 和 MRtrix3 生成的两个图谱是否完全一致
+# command: ./compare_fsl_mrtrix.sh /ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation/data/test/extract_mask/fsl/Yeo17_schaefer376_merge.nii.gz /ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation/data/test/extract_mask/mrtrix/Yeo17_schaefer376_merge.nii.gz
 
 FSL_RESULT=$1
 MRTRIX_RESULT=$2
@@ -49,9 +50,8 @@ fslmaths "$FSL_RESULT" -sub "$MRTRIX_RESULT" -abs "$diff_img"
 max_diff=$(fslstats "$diff_img" -R | awk '{print $2}')
 
 # Step 4: 判断是否完全一致
-tolerance=1e-6  # 允许极小浮点误差（但你的图谱是整数，应为0）
 
-if (( $(echo "$max_diff <= $tolerance" | bc -l) )); then
+if awk -v diff="$max_diff" -v tol="1e-6" 'BEGIN { exit (diff <= tol) ? 0 : 1 }'; then
     echo "✅ SUCCESS: The two images are identical (max difference = $max_diff)"
     
     # 额外验证：非零体素数是否相同（适用于整数标签图）
