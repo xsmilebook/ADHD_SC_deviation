@@ -17,58 +17,52 @@ atlaspath=${atlasdir}/${subj}_space-T1w_desc-preproc_desc-schaefer400_atlas.nii.
 mkdir -p ${atlasdir}/Yeo17_sep
 mkdir -p ${atlasdir}/schaefer376
 
+# Step1
 for i in `cat /share/home/xuxiaoyu/PKUADHD/code/schaefer376_index_Yeo17.csv`
 do
-index=$(echo $i | awk -F "," '{print $2}')
-echo index${index}
-# fslmaths $atlaspath -thr $index -uthr $index -bin ${atlasdir}/schaefer376/schaeferDelLM_${index}.nii.gz
-mrcalc $atlaspath $index -eq ${atlasdir}/schaefer376/schaeferDelLM_${index}.nii.gz -datatype bit
-
+    index=$(echo $i | awk -F "," '{print $2}')
+    echo index${index}
+    mrcalc $atlaspath $index -eq ${atlasdir}/schaefer376/schaeferDelLM_${index}.nii.gz
 done
 
+# Step2: initialize empty mask
 for k in $( seq 1 15 )
 do
-
-# fslmaths $atlasdir/${subj}_space-T1w_desc-preproc_desc-schaefer400_atlas.nii.gz -thr 500 -bin ${atlasdir}/Yeo17_sep/Yeo17_${k}.nii.gz
-mrcalc $atlaspath 0 -mult ${atlasdir}/Yeo17_sep/Yeo17_${k}.nii.gz -datatype bit
-
+    mrcalc $atlaspath 0 -mult ${atlasdir}/Yeo17_sep/Yeo17_${k}.nii.gz
 done
 
-
+# Step3: 
 dos2unix /share/home/xuxiaoyu/PKUADHD/code/schaefer376_index_Yeo17.csv
+for i in `cat /share/home/xuxiaoyu/PKUADHD/code/schaefer376_index_Yeo17.csv`; do
+    index=$(echo $i | awk -F "," '{print $2}')
+    name=$(echo $i | awk -F "," '{print $16}')
 
-for i in `cat /share/home/xuxiaoyu/PKUADHD/code/schaefer376_index_Yeo17.csv`
-do
-index=$(echo $i | awk -F "," '{print $2}')
-name=$(echo $i | awk -F "," '{print $16}')
-
-for j in $( seq 1 15 )
-do
-if [ "$name" -eq $j ]; then
-
-echo Schaefer${index} network${name}
-# fslmaths ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz -add $atlasdir/schaefer376/schaeferDelLM_${index}.nii.gz -bin ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz
-mrcalc ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz \
-        ${atlasdir}/schaefer376/schaeferDelLM_${index}.nii.gz \
-        -add 0 -gt \
-        ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz -datatype bit
-fi
-
-done
+    for j in $( seq 1 15 ); do
+        if [ "$name" -eq $j ]; then
+                echo "Schaefer${index} network${name}"
+                tmp_out=$(mktemp --suffix=.nii.gz)
+                mrcalc ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz \
+                        ${atlasdir}/schaefer376/schaeferDelLM_${index}.nii.gz \
+                        -max $tmp_out -force
+                mv $tmp_out ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz
+        fi
+    done
 
 done
 
 rm -rf ${atlasdir}/schaefer376/
 
+# Step4
+cp ${atlasdir}/Yeo17_sep/Yeo17_1.nii.gz ${atlasdir}/Yeo17_sep/merged.nii.gz
 for j in $( seq 2 15 )
 do
+    tmp_label=$(mktemp --suffix=.nii.gz)
+    mrcalc ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz $j -mult $tmp_label -force
 
-# fslmaths ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz -mul $j ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz
-# fslmaths ${atlasdir}/Yeo17_sep/Yeo17_1.nii.gz -add ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz ${atlasdir}/Yeo17_sep/Yeo17_1.nii.gz
-mrcalc ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz $j -mult ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz
-mrcalc ${atlasdir}/Yeo17_sep/Yeo17_1.nii.gz \
-        ${atlasdir}/Yeo17_sep/Yeo17_${j}.nii.gz \
-        -add ${atlasdir}/Yeo17_sep/Yeo17_1.nii.gz
+    tmp_merged=$(mktemp --suffix=.nii.gz)
+    mrcalc ${atlasdir}/Yeo17_sep/Yeo17_1.nii.gz $tmp_label -add $tmp_merged -force
+
+    rm -f $tmp_label
 done
 
 cp ${atlasdir}/Yeo17_sep/Yeo17_1.nii.gz ${atlasdir}/Yeo17_schaefer376_merge.nii.gz
