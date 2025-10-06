@@ -61,6 +61,8 @@ do
 
     tmp_merged=$(mktemp --suffix=.nii.gz)
     mrcalc ${atlasdir}/Yeo17_sep/Yeo17_1.nii.gz $tmp_label -add $tmp_merged -force
+    
+    mv $tmp_merged ${atlasdir}/Yeo17_sep/merged.nii.gz
 
     rm -f $tmp_label
 done
