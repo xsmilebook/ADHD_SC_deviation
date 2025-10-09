@@ -32,7 +32,7 @@ do
 done
 
 # Step3: 
-dos2unix /share/home/xuxiaoyu/PKUADHD/code/schaefer376_index_Yeo17.csv
+# dos2unix /share/home/xuxiaoyu/PKUADHD/code/schaefer376_index_Yeo17.csv
 for i in `cat /share/home/xuxiaoyu/PKUADHD/code/schaefer376_index_Yeo17.csv`; do
     index=$(echo $i | awk -F "," '{print $2}')
     name=$(echo $i | awk -F "," '{print $16}')
