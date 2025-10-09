@@ -18,7 +18,7 @@ if (Yeoresolution == 7){
 }else if (Yeoresolution == 17){
   Yeoresolution.delLM = 15
 }
-elementnum <- Yeoresolution.delLM*(Yeoresolution.delLM+1) /2
+elementnum <- Yeoresolution.delLM * (Yeoresolution.delLM + 1) / 2
 
 SC_path_EFNYnoCCNP <-'/ibmgpfs/cuizaixu_lab/congjing/brainproject/development/results/defaultatlas'
 SC_path_PKU6 <-'/ibmgpfs/cuizaixu_lab/xuxiaoyu/PKU6/SCmat'
