@@ -37,7 +37,7 @@ for (SClabel in SClabels) {
 }
 
 # WB_SCmean
-SCdata.sum75.merge.TD <- SCdataTD %>% select(all_of(c("WB_SCmean", "age", "sex", "mean_fd", "siteID", "ID")))
-SCdata.sum75.merge.TD$sex <- as.factor(SCdata.sum75.merge.TD$sex)
+SCdata.sum75.merge.TD <- SCdataTD %>% select(all_of(c("WB_SCmean", "age", "sex", "meanFD", "siteID", "scanID")))
+SCdata.sum75.merge.TD$sex <- factor(SCdata.sum75.merge.TD$sex, levels=c(1,2), labels=c("M", "F"))
 SCdata.sum75.merge.TD$siteID <- as.factor(SCdata.sum75.merge.TD$siteID)
 execute_boot(n, "WB_SCmean")
