@@ -1,0 +1,234 @@
+---
+title: "S3_summary_nommodel"
+output: html_document
+date: "2024-08-28"
+---
+In the first 2 steps, we selected the best distribution and degree of freedom via BIC. Now we are gonna use this script to perform model evaluation, sensitivity analyses, and visualization of normative trajectories.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+library(ggplot2)
+library(RColorBrewer)
+library(tidyverse)
+library(mgcv)
+library(openxlsx)
+library(parallel)
+library(gamlss)
+library(scales)
+library(psych)
+library(reshape)
+
+# set resolution
+Yeoresolution <- 17
+if (Yeoresolution == 7){
+  Yeoresolution.delLM = 6
+}else if (Yeoresolution == 17){
+  Yeoresolution.delLM = 15
+}
+element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
+
+# input directory
+homepath <- "D:/code/ADHD_SC_deviation"
+demopath <- file.path(homepath, "data", 'demography')
+interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
+functionFolder <- file.path(homepath, "src", "functions")
+resultFolder <- file.path(homepath, "reports", "results", "ABCD")
+functionFolder.SCDev <- file.path(homepath, "src", "gamfunction")
+FigureFolder <- paste0(homepath, '/reports/figures/ABCD/Yeo', Yeoresolution,'/CV75')
+
+# load data
+SCdata.sum75.merge <- readRDS(paste0(interfileFolder, '/SCdata_Yeo',Yeoresolution, '_CV75_sumSCinvnode.sum.msmtcsd.merge.rds'))
+SCdata.sum75.merge.TD.trainset <- readRDS(paste0(interfileFolder, "/SCdata.TD.trainset_SCYeo", element_num, ".rds"))
+SCdata.sum75.merge.TD.testset <- readRDS(paste0(interfileFolder, "/SCdata.TD.testset_SCYeo", element_num, ".rds"))
+
+# source function
+source(paste0(functionFolder, "/Construct_gamlss_set.R"))
+```
+
+# Step3. Model evaluation
+## 1. Model diagnosis
+The normalized quantile residuals of our normative model were also checked to evaluate the goodness of fit by utilizing two diagnostic methods. 1) Inspect four plots related to residuals. The residuals against the fitted values of mu and the index were evenly distributed around the horizontal line at 0. Moreover, the kernel density estimation of the residuals displayedan approximate normal distribution, and the normal quantile-quantile (Q-Q) plots exhibitedan approximately linear trend with an intercept of 0 and a slope of 1. 2) Adopt the detrended transformed Owen’s plots of the fitted normalized quantile residuals to evaluate the performance of the models. The function uses Owen’s method to construct a nonparametric confidence interval for the true distribution.The zero horizontal line was within the confidence intervals, suggesting that the residuals followed a normal distribution. Taken together, these results showed that our model fits the sample data appropriately.
+
+
+```{r model_diagnosis}
+# Mean whole-brain structural connectivity strength
+# visualize the distribution of dependent variable
+plot(density(SCdata.sum75.merge.TD.trainset$WB_SCmean), main = "Density Plot of whole-brain averaged structural connectivity", xlab = "Value", col = "blue")
+# fit models
+SCdata.sum75.merge.TD.trainset$sex <- as.factor(SCdata.sum75.merge.TD.trainset$sex)
+SCdata.sum75.merge.TD.trainset$siteID <- as.factor(SCdata.sum75.merge.TD.trainset$siteID)
+dataname <- "SCdata.sum75.merge.TD.trainset"
+smoothterm <- "age"
+covariates <- "sex+meanFD"
+randomvar <- "siteID"
+mu.df <- sigma.df <- degree <- 2
+distribution.fam <- "GG"
+IDvar <- "scanID"
+quantile.vec <- c(0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99)
+stratify <- c("sex", "siteID")
+dependentvar <- "WB_SCmean"
+sumlist <- construct_gamlss(dataname, dependentvar, smoothterm, covariates,randomvar, mu.df, sigma.df,degree, distribution.fam, IDvar, quantile.vec, stratify)
+model.WBmeanSC <- sumlist$mod.tmp
+summary(model.WBmeanSC)
+
+```
+
+Residual plots & Q-Q plots
+
+```{r residual_plots}
+newpar <- par(mfrow = c(2, 2), mar = par("mar") + c(0, 1, 0,0),
+              col.axis = "blue4", col = "blue4", col.main = "blue4",
+              col.lab = "blue4", pch = "+", cex = 0.45, cex.lab = 1.2,
+              cex.axis = 1, cex.main = 1.2)
+plot(model.WBmeanSC, par=newpar)
+
+tiff(filename = paste0(FigureFolder, "/ModelEvaluation/Residualplots_WBmeanSC.tiff"), width=20, height=16, units = "cm", res=300)
+newpar <- par(mfrow = c(2, 2), mar = par("mar") + c(0, 1, 0,0),
+              col.axis = "blue4", col = "blue4", col.main = "blue4",
+              col.lab = "blue4", pch = "+", cex = 0.45, cex.lab = 1.2,
+              cex.axis = 1, cex.main = 1.2)
+plot(model.WBmeanSC, par=newpar)
+dev.off()
+```
+
+Detrended transformed Owen’s plots
+
+```{r Owen_plots}
+dtop(model.WBmeanSC)
+
+tiff(filename = paste0(FigureFolder, "/ModelEvaluation/Owenplots_WBmeanSC.tiff"), width=10, height=8, units = "cm", res=300)
+dtop(model.WBmeanSC)
+dev.off()
+
+```
+
+## 2. Model sensitivity analyses (bootstrap)
+To determine reliability and stability of our GAMLSS fitted trajectories, and to obtain confidence intervals on all parameter estimates obtained from the GAMLSS fitting procedure as described above, we ran 1,000 bootstrap iterations with stratified sampling with replacement. The bootstrap replicates were stratified by sex, which maintains the relative proportions of the original datasets.
+
+```{r bootstrap}
+bootstrapdir <- paste0(interfileFolder, "/bootstrap/WB_meanSC")
+centile_female_boot <- list()
+centile_male_boot <- list()
+centile_boot <- list()
+for (i in 1:1000) {
+  centile.tmp <- readRDS(paste0(bootstrapdir, "/centile_bootstrap_", i, ".rds"))
+  if (centile.tmp$converged==T){
+    centile_F.tmp <- apply(centile.tmp$Centiles_female, c(2,3), mean)
+    centile_female_boot[[i]] <- centile_F.tmp
+    centile_M.tmp <- apply(centile.tmp$Centiles_male, c(2,3), mean)
+    centile_male_boot[[i]] <- centile_M.tmp
+    centile_boot[[i]] <- (centile_F.tmp+centile_M.tmp) / 2
+  }else{
+    centile_female_boot[[i]] <- NA
+    centile_male_boot[[i]] <- NA
+    centile_boot[[i]] <- NA
+  }
+}
+print(paste0(length(which(is.na(centile_female_boot))), " iterations are not converged."))
+
+# remove NA elements
+centile_female_boot <- centile_female_boot[!is.na(centile_female_boot)]
+centile_male_boot <- centile_male_boot[!is.na(centile_male_boot)]
+centile_boot <- centile_boot[!is.na(centile_boot)]
+
+centile_female_boot_3d <- array(unlist(centile_female_boot), dim = c(7, ncol(centile_F.tmp), length(centile_female_boot)))
+centile_male_boot_3d <- array(unlist(centile_male_boot), dim = c(7, ncol(centile_M.tmp), length(centile_male_boot)))
+centile_boot_3d <- array(unlist(centile_boot), dim = c(7, ncol(centile_M.tmp), length(centile_boot)))
+
+quantile.median <- data.frame(matrix(NA, ncol(centile_M.tmp), 7*3))
+quantiles<-c(0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99)
+names(quantile.median) <- c(paste0("female_quantiles", quantiles), paste0("male_quantiles", quantiles), paste0("all_quantiles", quantiles))
+quantile.P2.5 <- data.frame(matrix(NA, ncol(centile_M.tmp), 7*3))
+names(quantile.P2.5) <- c(paste0("female_quantiles", quantiles), paste0("male_quantiles", quantiles), paste0("all_quantiles", quantiles))
+quantile.P97.5 <- data.frame(matrix(NA, ncol(centile_M.tmp), 7*3))
+names(quantile.P97.5) <- c(paste0("female_quantiles", quantiles), paste0("male_quantiles", quantiles), paste0("all_quantiles", quantiles))
+
+for (i in 1:7) {
+  # female
+  ## median
+  quantile_female.vec <- centile_female_boot_3d[i, , ]
+  quantile_female.median <- lapply(1:dim(quantile_female.vec)[1], function(x) median(quantile_female.vec[x,]))
+  quantile_female.median <- unlist(quantile_female.median)
+  quantile.median[,i] <- quantile_female.median
+  ## P2.5
+  quantile_female.P2.5 <- lapply(1:dim(quantile_female.vec)[1], function(x) quantile(quantile_female.vec[x,], probs=0.025))
+  quantile_female.P2.5 <- unlist(quantile_female.P2.5)
+  quantile.P2.5[,i] <- quantile_female.P2.5
+  ## P97.5
+  quantile_female.P97.5 <- lapply(1:dim(quantile_female.vec)[1], function(x) quantile(quantile_female.vec[x,], probs=0.975))
+  quantile_female.P97.5 <- unlist(quantile_female.P97.5)
+  quantile.P97.5[,i] <- quantile_female.P97.5
+  
+  # male
+  ## median
+  quantile_male.vec <- centile_male_boot_3d[i, , ]
+  quantile_male.median <- lapply(1:dim(quantile_male.vec)[1], function(x) median(quantile_male.vec[x,]))
+  quantile_male.median <- unlist(quantile_male.median)
+  quantile.median[,i+7] <- quantile_male.median
+  ## P2.5
+  quantile_male.P2.5 <- lapply(1:dim(quantile_male.vec)[1], function(x) quantile(quantile_male.vec[x,], probs=0.025))
+  quantile_male.P2.5 <- unlist(quantile_male.P2.5)
+  quantile.P2.5[,i+7] <- quantile_male.P2.5
+  ## P97.5
+  quantile_male.P97.5 <- lapply(1:dim(quantile_male.vec)[1], function(x) quantile(quantile_male.vec[x,], probs=0.975))
+  quantile_male.P97.5 <- unlist(quantile_male.P97.5)
+  quantile.P97.5[,i+7] <- quantile_male.P97.5
+  
+  # all
+  ## median
+  quantile.vec <- centile_boot_3d[i, , ]
+  quantile_all.median <- lapply(1:dim(quantile.vec)[1], function(x) median(quantile.vec[x,]))
+  quantile_all.median <- unlist(quantile_all.median)
+  quantile.median[,i+14] <- quantile_all.median
+  ## P2.5
+  quantile_all.P2.5 <- lapply(1:dim(quantile.vec)[1], function(x) quantile(quantile.vec[x,], probs=0.025))
+  quantile_all.P2.5 <- unlist(quantile_all.P2.5)
+  quantile.P2.5[,i+14] <- quantile_all.P2.5
+  ## P97.5
+  quantile_all.P97.5 <- lapply(1:dim(quantile.vec)[1], function(x) quantile(quantile.vec[x,], probs=0.975))
+  quantile_all.P97.5 <- unlist(quantile_all.P97.5)
+  quantile.P97.5[,i+14] <- quantile_all.P97.5
+  
+}
+
+n_points <- nrow(quantile.median)
+quantile.median$age <- seq(min(SCdata.sum75.merge.TD$age), max(SCdata.sum75.merge.TD$age), length.out = n_points)
+quantile.P2.5$age <- seq(min(SCdata.sum75.merge.TD$age), max(SCdata.sum75.merge.TD$age), length.out = n_points)
+quantile.P97.5$age <- seq(min(SCdata.sum75.merge.TD$age), max(SCdata.sum75.merge.TD$age), length.out = n_points)
+
+# plot
+ggplot()+
+  #geom_point(data=SCdata.sum75.merge.TD, aes(x=age, y=WB_SCmean), color="grey", alpha=0.5)+
+  geom_line(data=quantile.median, aes(x=age, y=all_quantiles0.5), linetype="solid", linewidth=1.5)+
+  geom_line(data=quantile.P2.5, aes(x=age, y=all_quantiles0.5), linetype=2, linewidth=1)+
+  geom_line(data=quantile.P97.5, aes(x=age, y=all_quantiles0.5), linetype=2, linewidth=1)+
+  labs(x="Age (years)", y="SC strength", title="Bootstrap 95% CI of Whole-brain averaged SC strength")+
+  theme_classic()+
+  theme(plot.title = element_text(size=20, hjust=0.5),
+        axis.text = element_text(size=20), axis.title = element_text(size=20))
+
+ggsave(paste0(FigureFolder, "/ModelEvaluation/bootstrap_P50_95CI_WBmeanSC_all.tiff"), width=16, height=14, units = "cm")
+
+# plot female-male
+ggplot()+
+  #geom_point(data=SCdata.sum75.merge.TD, aes(x=age, y=WB_SCmean), color="grey", alpha=0.5)+
+  geom_line(data=quantile.median, aes(x=age, y=female_quantiles0.5), linetype="solid", linewidth=1.5, color="red")+
+  geom_line(data=quantile.P2.5, aes(x=age, y=female_quantiles0.5), linetype=2, linewidth=1, color="red")+
+  geom_line(data=quantile.P97.5, aes(x=age, y=female_quantiles0.5), linetype=2, linewidth=1, color="red")+
+  geom_line(data=quantile.median, aes(x=age, y=male_quantiles0.5), linetype="solid", linewidth=1.5, color="blue")+
+  geom_line(data=quantile.P2.5, aes(x=age, y=male_quantiles0.5), linetype=2, linewidth=1, color="blue")+
+  geom_line(data=quantile.P97.5, aes(x=age, y=male_quantiles0.5), linetype=2, linewidth=1, color="blue")+
+  labs(x="Age (years)", y="SC strength", title="Bootstrap 95% CI of Whole-brain averaged SC strength")+
+  theme_classic()+
+  theme(plot.title = element_text(size=20, hjust=0.5),
+        axis.text = element_text(size=20), axis.title = element_text(size=20))
+
+ggsave(paste0(FigureFolder, "/ModelEvaluation/bootstrap_P50_95CI_WBmeanSC_bysex.tiff"), width=16, height=14, units = "cm")
+
+```
+
+
+
+
+
