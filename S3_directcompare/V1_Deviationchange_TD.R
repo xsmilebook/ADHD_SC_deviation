@@ -16,14 +16,13 @@ if (Yeoresolution == 7){
 element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
 
 # input directory
-wd <- getwd()
-homepath <- str_split_i(wd, "Normative_model", 1)
-demopath <- paste0(homepath, '/Normative_model/demography')
-interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
-functionFolder <- paste0(homepath, "/Normative_model/functions")
-resultFolder <- paste0(homepath, "/Normative_model/results_ABCD")
-functionFolder.SCDev <- paste0(homepath, "/SC_development/Rcode_SCdevelopment/gamfunction")
-FigureFolder <- paste0(homepath, '/Normative_model/Figures_ABCD/Yeo', Yeoresolution,'/CV75')
+homepath <- "D:/code/ADHD_SC_deviation"
+demopath <- file.path(homepath, "data", 'demography')
+interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
+functionFolder <- file.path(homepath, "src", "functions")
+resultFolder <- file.path(homepath, "reports", "results", "ABCD")
+functionFolder.SCDev <- file.path(homepath, "src", "gamfunction")
+FigureFolder <- paste0(homepath, '/reports/figures/ABCD/Yeo', Yeoresolution,'/CV75')
 
 source(paste0(functionFolder, "/plotmatrix.R"))
 source(paste0(functionFolder.SCDev, "/SCrankcorr.R"))

@@ -14,15 +14,13 @@ element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
 
 # input directory
 wd <- getwd()
-homepath <- str_split_i(wd, "Normative_model", 1)
-demopath <- paste0(homepath, '/Normative_model/demography')
-interfileFolder <- paste0(homepath, '/Normative_model/interfileFolder_EFNYnoCCNP')
-interfileFolder_ABCD <- paste0(homepath, '/Normative_model/interfileFolder_ABCD')
-functionFolder <- paste0(homepath, "/Normative_model/functions")
-resultFolder <- paste0(homepath, "/Normative_model/results_EFNYnoCCNP")
-resultFolder_ABCD <- paste0(homepath, "/Normative_model/results_ABCD")
-functionFolder.SCDev <- paste0(homepath, "/SC_development/Rcode_SCdevelopment/gamfunction")
-FigureFolder <- paste0(homepath, '/Normative_model/Figures_EFNYnoCCNP/Yeo', Yeoresolution,'/CV75')
+homepath <- "D:/code/ADHD_SC_deviation"
+demopath <- file.path(homepath, "data", 'demography')
+interfileFolder <- file.path(homepath, "data", 'interfileFolder', "EFNYnoCCNP")
+functionFolder <- file.path(homepath, "src", "functions")
+resultFolder <- file.path(homepath, "reports", "results", "EFNYnoCCNP")
+functionFolder.SCDev <- file.path(homepath, "src", "gamfunction")
+FigureFolder <- file.path(homepath, 'reports', 'figures', 'EFNYnoCCNP', 'Yeo', Yeoresolution, 'CV75')
 
 source(paste0(functionFolder.SCDev, "/gamsmooth.R"))
 source(paste0(functionFolder.SCDev, "/plotdata_generate.R"))
