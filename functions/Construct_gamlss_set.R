@@ -16,7 +16,6 @@ construct_gamlss <- function(gam.data, dependentvar, smoothterm, covariates,rand
     gam.data <- get(gam.data, envir = .GlobalEnv)
   }
 
-  # 数据预处理
   gam.data <- gam.data %>% drop_na(c(dependentvar, smoothterm))
   covariates <- gsub(" ", "", covariates)
   if (!is.na(randomvar)){
@@ -38,7 +37,6 @@ construct_gamlss <- function(gam.data, dependentvar, smoothterm, covariates,rand
     stop(paste("Missing columns:", paste(missing_cols, collapse=",")))
   }
 
-  # 构建模型
   if (! is.na(randomvar)){
     mod.mu.formula <- as.formula(sprintf("%s ~ bs(%s, df = %s, degree=%s) + %s + random(%s)", dependentvar, smoothterm, mu.df, degree, covariates, randomvar))
     mod.mu.null.formula <- as.formula(sprintf("%s ~ %s + random(%s)", dependentvar, covariates, randomvar))
@@ -50,10 +48,8 @@ construct_gamlss <- function(gam.data, dependentvar, smoothterm, covariates,rand
   # Build sigma formula
   sigma.formula <- as.formula(sprintf("~ bs(%s, df = %s, degree = %s) + %s", smoothterm, sigma.df, degree, covariates))
 
-  # 拟合主模型
   mod.tmp <- gamlss(mod.mu.formula, sigma.formula = sigma.formula, nu.formula = ~1, family = get(distribution.fam), data = gam.data2, control = con)
 
-  # 拟合空模型（可能失败则设为 NA）
   sigma.null.formula <- as.formula(sprintf("~ %s", covariates))
   mod.null.tmp <- tryCatch(
     gamlss(mod.mu.null.formula, sigma.formula = sigma.null.formula, nu.formula = ~1, family = get(distribution.fam), data = gam.data2, control = con),
@@ -75,14 +71,12 @@ construct_gamlss <- function(gam.data, dependentvar, smoothterm, covariates,rand
     partialRsq <- (sse.nullmodel - sse.model)/sse.nullmodel
   }
 
-  # 一阶导数与方向
   PEF <- getPEF(mod.tmp, term=smoothterm, n.points = 1000, parameter = "mu", type="response", plot = FALSE)
   x_values <- seq(min(gam.data2[[smoothterm]]), max(gam.data2[[smoothterm]]), length.out = 1000)
   PEF_test <- PEF(x_values, deriv=1)
   direction <- sum(PEF_test) / abs(sum(PEF_test))
   performance.tb$partialRsq[1] <- partialRsq * direction
 
-  # 分位数曲线
   n_quantiles <- length(quantile.vec)
   n_points <- 1000
   x.tmp <- seq(min(gam.data2[[smoothterm]]), max(gam.data2[[smoothterm]]), length.out=n_points)
