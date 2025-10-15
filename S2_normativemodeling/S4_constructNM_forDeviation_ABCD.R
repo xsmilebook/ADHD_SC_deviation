@@ -69,6 +69,7 @@ write.csv(tableone.df, paste0(resultFolder, "/demoinfo_testtrainsetsTD_Yeo17.csv
 ## Fit normative models
 SCdata.TD.trainset <- as.data.frame(SCdata.TD.trainset)
 SCdata.TD.trainset[,c("sex", "siteID")] <- lapply(SCdata.TD.trainset[,c("sex", "siteID")], as.factor)
+gam.data2 <- SCdata.TD.trainset
 smoothterm <- "age"
 covariates <- "sex+meanFD"
 randomvar <- "siteID"
@@ -81,7 +82,7 @@ if (! file.exists(paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,".TDtrain
   num_cores <- min(parallel::detectCores() - 4, 24)
   cl <- parallel::makeCluster(num_cores)
 
-  parallel::clusterExport(cl, c("SCdata.TD.trainset", "smoothterm", "covariates", "randomvar", 
+  parallel::clusterExport(cl, c("SCdata.TD.trainset", "gam.data2", "smoothterm", "covariates", "randomvar", 
                                "mu.df", "sigma.df", "degree", "distribution.fam", 
                                "IDvar", "quantile.vec", "stratify", "construct_gamlss"))
 
