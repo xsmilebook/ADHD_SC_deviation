@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=ABCD
-#SBATCH --output=/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation/reports/log/Normative Model/NM.out
-#SBATCH --error=/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation/reports/log/Normative Model/NM.err
+#SBATCH --output=/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation/reports/log/Normative_Model/NM.out
+#SBATCH --error=/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation/reports/log/Normative_Model/NM.err
 #SBATCH --partition=q_fat_l
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=72
