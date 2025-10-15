@@ -15,7 +15,7 @@ construct_gamlss <- function(gam.data, dependentvar, smoothterm, covariates,rand
       filter(n() > 30) %>%
       ungroup()
   }else{
-    gam.data2 <- gam.data %>% dplyr::select(c(dependentvar, smoothterm, unlist(strsplit(covariates, "+", fixed=T)), IDvar)) %>% drop_na()
+    gam.data2 <- gam.data %>% dplyr::select(all_of(c(dependentvar, smoothterm, unlist(strsplit(covariates, "+", fixed=T)), IDvar))) %>% drop_na()
   }
   
   con<-gamlss.control(n.cyc=200)
@@ -33,6 +33,8 @@ construct_gamlss <- function(gam.data, dependentvar, smoothterm, covariates,rand
   sigma.formula <- as.formula(sprintf("~ bs(%s, df = %s, degree = %s) + %s", smoothterm, sigma.df, degree, covariates))
   
   # Fit main model
+  assign("gam.data2", gam.data2, envir = .GlobalEnv)
+  
   mod.tmp <- gamlss(mod.mu.formula, 
                     sigma.formula = sigma.formula,
                     nu.formula = ~1,
