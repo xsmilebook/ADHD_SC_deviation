@@ -16,7 +16,7 @@ if (Yeoresolution == 7){
 }
 element_num <- Yeoresolution.delLM*(Yeoresolution.delLM+1)/2
 # input directory
-homepath <- "D:/code/ADHD_SC_deviation"
+homepath <- "/ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation"
 demopath <- file.path(homepath, "data", 'demography')
 interfileFolder <- file.path(homepath, "data", 'interfileFolder', "ABCD")
 functionFolder <- file.path(homepath, "src", "functions")
@@ -85,7 +85,7 @@ if (! file.exists(paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,".TDtrain
                                 mu.df, sigma.df, degree, distribution.fam,IDvar, quantile.vec, stratify)
     
     return(sumlist)
-  }, mc.cores = 40)
+  }, mc.cores = 64)
   saveRDS(mod.training.sum, paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,".TDtraining.sum.rds"))
 }else{
   mod.training.sum <- readRDS(paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,".TDtraining.sum.rds"))
@@ -178,7 +178,7 @@ if (! file.exists(paste0(interfileFolder, "/SCdata.sum75_Yeo", Yeoresolution,".t
     
     
     return(deviation.df)
-  }, mc.cores = 40)
+  }, mc.cores = 64)
   saveRDS(deviations.sum, paste0(interfileFolder, "/SCdata.sum75_Yeo", Yeoresolution,".testset_ADHD_deviation.rds"))
 }else{
   deviations.sum <- readRDS(paste0(interfileFolder, "/SCdata.sum75_Yeo", Yeoresolution,".testset_ADHD_deviation.rds"))
