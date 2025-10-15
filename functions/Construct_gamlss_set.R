@@ -3,13 +3,12 @@ library(tidyverse)
 library(gamlss)
 ## Function 1. construct GAMLSS & return model objects and performance.
 ## This function is used to fit a GAMLSS containing a smooth term.
-construct_gamlss <- function(dataname, dependentvar, smoothterm, covariates,randomvar=NA, mu.df, sigma.df,degree, distribution.fam,IDvar, quantile.vec, stratify=NULL){
+construct_gamlss <- function(gam.data, dependentvar, smoothterm, covariates,randomvar=NA, mu.df, sigma.df,degree, distribution.fam,IDvar, quantile.vec, stratify=NULL){
   
-  # get data
-  gam.data <- get(dataname)
+  # process data directly (no need for get() or assign())
   gam.data <- gam.data %>% drop_na(c(dependentvar, smoothterm))
   covariates <- gsub(" ", "", covariates)
-  if (! is.na(randomvar)){
+  if (!is.na(randomvar)){
     gam.data1 <- gam.data %>% dplyr::select(all_of(c(dependentvar, smoothterm, unlist(strsplit(covariates, "+", fixed=T)), randomvar, IDvar))) %>% drop_na()
     gam.data1$randomvar <- as.factor(gam.data1[[randomvar]])
     gam.data2 <- gam.data1 %>% group_by(randomvar) %>%
@@ -21,7 +20,6 @@ construct_gamlss <- function(dataname, dependentvar, smoothterm, covariates,rand
   
   con<-gamlss.control(n.cyc=200)
   gam.data2 <- as.data.frame(gam.data2)
-  assign("gam.data2", gam.data2, envir = .GlobalEnv)
   # construct model
   if (! is.na(randomvar)){
     mod.mu.formula <- as.formula(sprintf("%s ~ bs(%s, df = %s, degree=%s) + %s + random(%s)", dependentvar, smoothterm, mu.df, degree, covariates, randomvar))
@@ -31,16 +29,26 @@ construct_gamlss <- function(dataname, dependentvar, smoothterm, covariates,rand
     mod.mu.null.formula <- as.formula(sprintf("%s ~ %s", dependentvar, covariates))
   }
   
-  command <- paste0("mod.tmp <- gamlss(mod.mu.formula, sigma.formula =~ bs(", smoothterm, ", df = ", sigma.df, ", degree = ", 
-                    degree, ") + ", covariates, 
-                    ", nu.formula = ~1,family=", distribution.fam,", data=gam.data2, control=con)")
+  # Build sigma formula
+  sigma.formula <- as.formula(sprintf("~ bs(%s, df = %s, degree = %s) + %s", smoothterm, sigma.df, degree, covariates))
   
-  command.null <- paste0("mod.null.tmp <- gamlss(mod.mu.null.formula, sigma.formula =~  ", covariates, 
-                         ", nu.formula = ~1,family=", distribution.fam,", data=gam.data2, control=con)")
+  # Fit main model
+  mod.tmp <- gamlss(mod.mu.formula, 
+                    sigma.formula = sigma.formula,
+                    nu.formula = ~1,
+                    family = get(distribution.fam),
+                    data = gam.data2, 
+                    control = con)
   
-  eval(parse(text = command))
+  # Fit null model
+  sigma.null.formula <- as.formula(sprintf("~ %s", covariates))
   mod.null.tmp <- tryCatch(expr={
-    eval(parse(text = command.null))
+    gamlss(mod.mu.null.formula, 
+           sigma.formula = sigma.null.formula,
+           nu.formula = ~1,
+           family = get(distribution.fam),
+           data = gam.data2, 
+           control = con)
   },
   error=function(e){
     return(NA)
@@ -79,8 +87,9 @@ construct_gamlss <- function(dataname, dependentvar, smoothterm, covariates,rand
     for (l in 1:nlevels(gam.data2[[stratify]])){
       centile.tmp <- array(NA, dim=c(n_quantiles, n_points))
       for (q in 1:n_quantiles){
-        command <- paste0("Qua <- getQuantile(mod.tmp, quantile=quantile.vec[q], term = '", smoothterm,"', fixed.at = list(", stratify, "=", levels(gam.data2[[stratify]])[l],"), n.points = n_points)")
-        eval(parse(text = command))
+        Qua <- getQuantile(mod.tmp, quantile=quantile.vec[q], term = smoothterm, 
+                          fixed.at = setNames(list(levels(gam.data2[[stratify]])[l]), stratify), 
+                          n.points = n_points)
         centile.tmp[q, ] <- Qua(x.tmp)
       }
       centiles_strat[[l]] <- centile.tmp
@@ -94,8 +103,10 @@ construct_gamlss <- function(dataname, dependentvar, smoothterm, covariates,rand
       centile.tmp <- array(NA, dim=c(n_quantiles, n_points, length(levels(gam.data2[[stratify.2]]))))
       for (s in 1:nlevels(gam.data2[[stratify.2]])){
         for (q in 1:n_quantiles){
-          command <- paste0("Qua <- getQuantile(mod.tmp, quantile=quantile.vec[q], term = '", smoothterm,"', fixed.at = list(", stratify.1, "='", levels(gam.data2[[stratify.1]])[l],"',", stratify.2, "='", levels(gam.data2[[stratify.2]])[s], "'), n.points = n_points)")
-          eval(parse(text = command))
+          fixed_at_list <- setNames(list(levels(gam.data2[[stratify.1]])[l], levels(gam.data2[[stratify.2]])[s]), 
+                                   c(stratify.1, stratify.2))
+          Qua <- getQuantile(mod.tmp, quantile=quantile.vec[q], term = smoothterm, 
+                            fixed.at = fixed_at_list, n.points = n_points)
           centile.tmp[q, ,s] <- Qua(x.tmp)
         }
       }
@@ -106,8 +117,7 @@ construct_gamlss <- function(dataname, dependentvar, smoothterm, covariates,rand
   }else if (length(stratify)==0){
     centiles_strat <- array(NA, dim=c(n_quantiles, n_points))
     for (q in 1:n_quantiles){
-      command <- paste0("Qua <- getQuantile(mod.tmp, quantile=quantile.vec[q], term = '", smoothterm,"', n.points = n_points)")
-      eval(parse(text = command))
+      Qua <- getQuantile(mod.tmp, quantile=quantile.vec[q], term = smoothterm, n.points = n_points)
       centiles_strat[q, ] <- Qua(x.tmp)
     }
   }
@@ -117,12 +127,3 @@ construct_gamlss <- function(dataname, dependentvar, smoothterm, covariates,rand
 
   return(sumlist)
 }
-
-
-
-
-
-
-
-
-

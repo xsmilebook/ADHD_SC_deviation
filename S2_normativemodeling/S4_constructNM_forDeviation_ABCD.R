@@ -69,7 +69,6 @@ write.csv(tableone.df, paste0(resultFolder, "/demoinfo_testtrainsetsTD_Yeo17.csv
 ## Fit normative models
 SCdata.TD.trainset <- as.data.frame(SCdata.TD.trainset)
 SCdata.TD.trainset[,c("sex", "siteID")] <- lapply(SCdata.TD.trainset[,c("sex", "siteID")], as.factor)
-dataname <- "SCdata.TD.trainset"
 smoothterm <- "age"
 covariates <- "sex+meanFD"
 randomvar <- "siteID"
@@ -79,19 +78,34 @@ IDvar <- "scanID"
 quantile.vec <- c(0.025, 0.5, 0.975)
 stratify <- c("sex", "siteID")
 if (! file.exists(paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,".TDtraining.sum.rds"))){
-  mod.training.sum <- mclapply(1:element_num, function(i){
+  num_cores <- min(parallel::detectCores() - 4, 24)
+  cl <- parallel::makeCluster(num_cores)
+
+  parallel::clusterExport(cl, c("SCdata.TD.trainset", "smoothterm", "covariates", "randomvar", 
+                               "mu.df", "sigma.df", "degree", "distribution.fam", 
+                               "IDvar", "quantile.vec", "stratify", "construct_gamlss"))
+
+  parallel::clusterEvalQ(cl, {
+    library(gamlss)
+    library(tidyverse)
+  })
+
+  mod.training.sum <- parallel::parLapply(cl, 1:element_num, function(i){
     dependentvar <- paste0("SC.", i)
-    sumlist <- construct_gamlss(dataname, dependentvar, smoothterm, covariates,randomvar, 
-                                mu.df, sigma.df, degree, distribution.fam,IDvar, quantile.vec, stratify)
+    sumlist <- construct_gamlss(SCdata.TD.trainset, dependentvar, smoothterm, covariates, randomvar, 
+                                mu.df, sigma.df, degree, distribution.fam, IDvar, quantile.vec, stratify)
     
     return(sumlist)
-  }, mc.cores = 40)
+  })
+  
+  parallel::stopCluster(cl)
+  
   saveRDS(mod.training.sum, paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,".TDtraining.sum.rds"))
 }else{
  mod.training.sum <- readRDS(paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,".TDtraining.sum.rds"))
 }
 
-mod.training.WB <- construct_gamlss(dataname, dependentvar="WB_SCmean", smoothterm, covariates,randomvar, 
+mod.training.WB <- construct_gamlss(SCdata.TD.trainset, dependentvar="WB_SCmean", smoothterm, covariates,randomvar, 
                                     mu.df, sigma.df, degree, distribution.fam,IDvar, quantile.vec, stratify)
 
 mod.training.sum[[element_num+1]] <- mod.training.WB
@@ -101,7 +115,7 @@ saveRDS(mod.training.WB, paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,"_
 SCdata.TD.trainset.subset <- SCdata.TD.trainset %>% dplyr::select(c(paste0("SC.", 1:element_num),"WB_SCmean", "age", "sex", "siteID","scanID",
                                                                                      "meanFD", "if_TD", "eventname2")) %>% drop_na()
 SCdata.ADHD <- SCdata.ADHD %>% filter(siteID %in% SCdata.TD.trainset$siteID)
-SCdata.ADHD <- SCdata.ADHD %>% filter( WB_SCmean> mean(WB_SCmean)-3*sd(WB_SCmean), WB_SCmean< mean(WB_SCmean)+3*sd(WB_SCmean))
+SCdata.ADHD <- SCdata.ADHD %>% filter(WB_SCmean > mean(WB_SCmean)-3*sd(WB_SCmean), WB_SCmean< mean(WB_SCmean)+3*sd(WB_SCmean))
 SCdata.ADHD.subset <- SCdata.ADHD %>% dplyr::select(c(paste0("SC.", 1:element_num),"WB_SCmean", "age", "sex", "siteID","scanID",
                                                                        "meanFD","if_TD", "eventname2")) %>% drop_na()
 
@@ -119,10 +133,20 @@ SCdata.requireZ_fixed.M$sex <- factor(1)
 SCdata.TD.trainset$siteID <- droplevels(SCdata.TD.trainset$siteID)
 sitelist <- unique(SCdata.TD.trainset$siteID)
 
-gam.data2 <- SCdata.TD.trainset.subset
 if (! file.exists(paste0(interfileFolder, "/SCdata.sum75_Yeo", Yeoresolution,".testset_ADHD_deviation.rds"))){
   
-  deviations.sum <- mclapply(1:(element_num+1), function(i){
+  num_cores <- min(parallel::detectCores() - 4, 24) 
+  cl <- parallel::makeCluster(num_cores)
+  
+  parallel::clusterExport(cl, c("mod.training.sum", "SCdata.requireZ", "SCdata.requireZ_fixed.F", 
+                               "SCdata.requireZ_fixed.M", "sitelist", "element_num"))
+  
+  parallel::clusterEvalQ(cl, {
+    library(gamlss)
+    library(tidyverse)
+  })
+  
+  deviations.sum <- parallel::parLapply(cl, 1:(element_num+1), function(i){
     mod.tmp <- mod.training.sum[[i]]$mod.tmp
     mu_pred <- predict(mod.tmp, newdata = SCdata.requireZ, what = "mu", type = "response")
     sigma_pred <- predict(mod.tmp, newdata = SCdata.requireZ, what = "sigma", type = "response")
@@ -178,7 +202,10 @@ if (! file.exists(paste0(interfileFolder, "/SCdata.sum75_Yeo", Yeoresolution,".t
     
     
     return(deviation.df)
-  }, mc.cores = 40)
+  })
+  
+  parallel::stopCluster(cl)
+  
   saveRDS(deviations.sum, paste0(interfileFolder, "/SCdata.sum75_Yeo", Yeoresolution,".testset_ADHD_deviation.rds"))
 }else{
  deviations.sum <- readRDS(paste0(interfileFolder, "/SCdata.sum75_Yeo", Yeoresolution,".testset_ADHD_deviation.rds"))
