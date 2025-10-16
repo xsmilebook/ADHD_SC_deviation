@@ -85,7 +85,7 @@ if (! file.exists(paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,".TDtrain
                                 mu.df, sigma.df, degree, distribution.fam,IDvar, quantile.vec, stratify)
     
     return(sumlist)
-  }, mc.cores = 64)
+  }, mc.cores = 48)
   saveRDS(mod.training.sum, paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,".TDtraining.sum.rds"))
 }else{
   mod.training.sum <- readRDS(paste0(interfileFolder, "/GAMLSS_Yeo", Yeoresolution,".TDtraining.sum.rds"))
@@ -178,7 +178,7 @@ if (! file.exists(paste0(interfileFolder, "/SCdata.sum75_Yeo", Yeoresolution,".t
     
     
     return(deviation.df)
-  }, mc.cores = 64)
+  }, mc.cores = 48)
   saveRDS(deviations.sum, paste0(interfileFolder, "/SCdata.sum75_Yeo", Yeoresolution,".testset_ADHD_deviation.rds"))
 }else{
   deviations.sum <- readRDS(paste0(interfileFolder, "/SCdata.sum75_Yeo", Yeoresolution,".testset_ADHD_deviation.rds"))

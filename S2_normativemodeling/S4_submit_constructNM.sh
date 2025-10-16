@@ -6,5 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=72
 
+export OPENBLAS_NUM_THREADS=1
+
 module load R/4.2.2
 Rscript /ibmgpfs/cuizaixu_lab/xuhaoshu/ADHD_SC_deviation/src/S2_normativemodeling/S4_constructNM_forDeviation_ABCD.R
